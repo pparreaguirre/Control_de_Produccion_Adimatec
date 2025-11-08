@@ -13,7 +13,7 @@ import io
 st.set_page_config(
     page_title="Dashboard de Producción - Adimatec",
     page_icon="🏭",
-    layout="wide",  # Streamlit ajusta el layout para móviles
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -29,7 +29,7 @@ def load_logo(url):
 
 logo = load_logo("https://i.postimg.cc/hjfVhfXf/Logo-Adimatec.jpg")
 
-# Título principal con logo - MEJORADO: Logo a la izquierda, título centrado, icono a la derecha
+# Título principal con logo
 col_logo, col_title, col_icon = st.columns([1, 3, 1])
 with col_logo:
     if logo:
@@ -48,15 +48,27 @@ with col_icon:
 
 st.markdown("---")
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # Cache de 1 hora para actualizaciones automáticas
 def load_data():
-    """Cargar datos desde el archivo migrado"""
+    """Cargar datos desde Google Sheets"""
     try:
-        ot_master = pd.read_excel('Control_Produccion_Migrado.xlsx', sheet_name='OT_MASTER')
-        procesos = pd.read_excel('Control_Produccion_Migrado.xlsx', sheet_name='PROCESOS')
+        # REEMPLAZA ESTAS URLs CON LAS DE TUS GOOGLE SHEETS
+        # URL para OT_MASTER
+        ot_master_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit?usp=sharing&ouid=115443194527122417791&rtpof=true&sd=true"
+        ot_master_csv = ot_master_url.replace('/edit?usp=sharing', '/export?format=csv')
+        
+        # URL para PROCESOS  
+        procesos_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit?usp=sharing&ouid=115443194527122417791&rtpof=true&sd=true"
+        procesos_csv = procesos_url.replace('/edit?usp=sharing', '/export?format=csv')
+        
+        # Cargar datos desde Google Sheets
+        ot_master = pd.read_csv(ot_master_csv)
+        procesos = pd.read_csv(procesos_csv)
+        
         return ot_master, procesos
     except Exception as e:
-        st.error(f"Error al cargar los datos: {e}")
+        st.error(f"Error al cargar los datos desde Google Sheets: {e}")
+        st.info("Asegúrate de que las URLs de Google Sheets sean correctas y estén publicadas")
         return None, None
 
 # Cargar datos
