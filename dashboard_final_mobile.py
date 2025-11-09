@@ -74,14 +74,6 @@ def load_data():
 # Cargar datos
 ot_master, procesos = load_data()
 
-# VERIFICACIÓN TEMPORAL - elimina después de que funcione
-if ot_master is not None:
-    st.sidebar.write("✅ OT_MASTER cargado - Filas:", len(ot_master))
-    st.sidebar.write("Columnas OT_MASTER:", list(ot_master.columns))
-if procesos is not None:
-    st.sidebar.write("✅ PROCESOS cargado - Filas:", len(procesos))
-    st.sidebar.write("Columnas PROCESOS:", list(procesos.columns))
-
 if ot_master is None or procesos is None:
     st.stop()
 
