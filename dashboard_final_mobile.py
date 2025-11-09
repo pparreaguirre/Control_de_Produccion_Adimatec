@@ -48,18 +48,28 @@ with col_icon:
 
 st.markdown("---")
 
-@st.cache_data(ttl=3600)  # Cache de 1 hora para actualizaciones automáticas
+@st.cache_data(ttl=3600)
 def load_data():
+    # Cargar datos
+ot_master, procesos = load_data()
+
+# VERIFICACIÓN TEMPORAL - elimina después de que funcione
+if ot_master is not None:
+    st.sidebar.write("✅ OT_MASTER cargado - Filas:", len(ot_master))
+    st.sidebar.write("Columnas OT_MASTER:", list(ot_master.columns))
+if procesos is not None:
+    st.sidebar.write("✅ PROCESOS cargado - Filas:", len(procesos))
+    st.sidebar.write("Columnas PROCESOS:", list(procesos.columns))
     """Cargar datos desde Google Sheets"""
     try:
-       # REEMPLAZA ESTAS URLs CON LAS DE TUS GOOGLE SHEETS
+        # URLs CORREGIDAS para Google Sheets
         # URL para OT_MASTER
         ot_master_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=950986814"
-        ot_master_csv = ot_master_url.replace('/edit?usp=sharing', '/export?format=csv')
+        ot_master_csv = ot_master_url.replace('/edit#gid=950986814', '/export?format=csv&gid=950986814')
         
         # URL para PROCESOS  
         procesos_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=813063462"
-        procesos_csv = procesos_url.replace('/edit?usp=sharing', '/export?format=csv')
+        procesos_csv = procesos_url.replace('/edit#gid=813063462', '/export?format=csv&gid=813063462')
         
         # Cargar datos desde Google Sheets
         ot_master = pd.read_csv(ot_master_csv)
