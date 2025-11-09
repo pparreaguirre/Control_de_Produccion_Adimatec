@@ -50,16 +50,6 @@ st.markdown("---")
 
 @st.cache_data(ttl=3600)
 def load_data():
-    # Cargar datos
-ot_master, procesos = load_data()
-
-# VERIFICACIÓN TEMPORAL - elimina después de que funcione
-if ot_master is not None:
-    st.sidebar.write("✅ OT_MASTER cargado - Filas:", len(ot_master))
-    st.sidebar.write("Columnas OT_MASTER:", list(ot_master.columns))
-if procesos is not None:
-    st.sidebar.write("✅ PROCESOS cargado - Filas:", len(procesos))
-    st.sidebar.write("Columnas PROCESOS:", list(procesos.columns))
     """Cargar datos desde Google Sheets"""
     try:
         # URLs CORREGIDAS para Google Sheets
@@ -83,6 +73,14 @@ if procesos is not None:
 
 # Cargar datos
 ot_master, procesos = load_data()
+
+# VERIFICACIÓN TEMPORAL - elimina después de que funcione
+if ot_master is not None:
+    st.sidebar.write("✅ OT_MASTER cargado - Filas:", len(ot_master))
+    st.sidebar.write("Columnas OT_MASTER:", list(ot_master.columns))
+if procesos is not None:
+    st.sidebar.write("✅ PROCESOS cargado - Filas:", len(procesos))
+    st.sidebar.write("Columnas PROCESOS:", list(procesos.columns))
 
 if ot_master is None or procesos is None:
     st.stop()
@@ -277,7 +275,6 @@ else:
 
 st.markdown("---")
 
-# [EL RESTO DEL CÓDIGO SE MANTIENE EXACTAMENTE IGUAL - GRÁFICOS EXISTENTES]
 # Gráficos existentes - En móviles se apilarán
 col1, col2 = st.columns(2)
 
@@ -343,93 +340,103 @@ else:
 st.subheader("⏰ Horas Estimadas vs Horas Reales por Proceso")
 
 if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns:
-    # Agrupar por proceso y sumar horas estimadas y reales
-    horas_por_proceso = procesos_filtrados.groupby('proceso').agg({
-        'horas_estimadas': 'sum',
-        'horas_reales': 'sum'
-    }).reset_index()
+    # Buscar la columna de proceso
+    posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
+    columna_proceso = None
+    
+    for nombre in posibles_nombres:
+        if nombre in procesos_filtrados.columns:
+            columna_proceso = nombre
+            break
+    
+    if columna_proceso:
+        # Agrupar por proceso y sumar horas estimadas y reales
+        horas_por_proceso = procesos_filtrados.groupby(columna_proceso).agg({
+            'horas_estimadas': 'sum',
+            'horas_reales': 'sum'
+        }).reset_index()
 
-    # Tomar los top 10 procesos por horas estimadas
-    top_procesos = horas_por_proceso.nlargest(10, 'horas_estimadas')
+        # Tomar los top 10 procesos por horas estimadas
+        top_procesos = horas_por_proceso.nlargest(10, 'horas_estimadas')
 
-    # Crear gráfico de barras comparativo
-    fig = go.Figure()
+        # Crear gráfico de barras comparativo
+        fig = go.Figure()
 
-    # Barras para horas estimadas
-    fig.add_trace(go.Bar(
-        name='Horas Estimadas',
-        x=top_procesos['proceso'],
-        y=top_procesos['horas_estimadas'],
-        marker_color='#1f77b4',
-        text=top_procesos['horas_estimadas'].round(1),
-        textposition='outside'
-    ))
+        # Barras para horas estimadas
+        fig.add_trace(go.Bar(
+            name='Horas Estimadas',
+            x=top_procesos[columna_proceso],
+            y=top_procesos['horas_estimadas'],
+            marker_color='#1f77b4',
+            text=top_procesos['horas_estimadas'].round(1),
+            textposition='outside'
+        ))
 
-    # Barras para horas reales
-    fig.add_trace(go.Bar(
-        name='Horas Reales',
-        x=top_procesos['proceso'],
-        y=top_procesos['horas_reales'],
-        marker_color='#ff7f0e',
-        text=top_procesos['horas_reales'].round(1),
-        textposition='outside'
-    ))
+        # Barras para horas reales
+        fig.add_trace(go.Bar(
+            name='Horas Reales',
+            x=top_procesos[columna_proceso],
+            y=top_procesos['horas_reales'],
+            marker_color='#ff7f0e',
+            text=top_procesos['horas_reales'].round(1),
+            textposition='outside'
+        ))
 
-    fig.update_layout(
-        title="Comparación: Horas Estimadas vs Reales por Proceso (Datos Reales)",
-        xaxis_title="Proceso",
-        yaxis_title="Horas",
-        barmode='group',
-        height=500,
-        showlegend=True
-    )
+        fig.update_layout(
+            title="Comparación: Horas Estimadas vs Reales por Proceso (Datos Reales)",
+            xaxis_title="Proceso",
+            yaxis_title="Horas",
+            barmode='group',
+            height=500,
+            showlegend=True
+        )
 
-    st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    # Métricas de eficiencia con datos reales
-    st.subheader("📊 Eficiencia en Horas (Datos Reales)")
-    
-    total_horas_estimadas = procesos_filtrados['horas_estimadas'].sum()
-    total_horas_reales = procesos_filtrados['horas_reales'].sum()
-    
-    if total_horas_estimadas > 0:
-        eficiencia_global = (total_horas_estimadas / total_horas_reales * 100).round(1)
-        diferencia_horas = total_horas_reales - total_horas_estimadas
-    else:
-        eficiencia_global = 0
-        diferencia_horas = 0
-    
-    # En móviles, estas métricas se apilarán
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Horas Estimadas Totales", f"{total_horas_estimadas:.1f}")
-    
-    with col2:
-        st.metric("Horas Reales Totales", f"{total_horas_reales:.1f}")
-    
-    with col3:
-        st.metric("Diferencia", f"{diferencia_horas:.1f}", 
-                 delta=f"{diferencia_horas:.1f}")
-    
-    with col4:
-        st.metric("Eficiencia", f"{eficiencia_global}%")
-    
-    # Análisis adicional por proceso
-    st.subheader("📈 Análisis de Eficiencia por Proceso")
-    
-    # Calcular eficiencia por proceso
-    horas_por_proceso['eficiencia'] = (horas_por_proceso['horas_estimadas'] / horas_por_proceso['horas_reales'] * 100).round(1)
-    horas_por_proceso['diferencia'] = horas_por_proceso['horas_reales'] - horas_por_proceso['horas_estimadas']
-    
-    # Mostrar tabla de eficiencia
-    st.dataframe(
-        horas_por_proceso[['proceso', 'horas_estimadas', 'horas_reales', 'diferencia', 'eficiencia']]
-        .sort_values('eficiencia', ascending=False)
-        .round(1),
-        use_container_width=True,
-        height=300
-    )
+        # Métricas de eficiencia con datos reales
+        st.subheader("📊 Eficiencia en Horas (Datos Reales)")
+        
+        total_horas_estimadas = procesos_filtrados['horas_estimadas'].sum()
+        total_horas_reales = procesos_filtrados['horas_reales'].sum()
+        
+        if total_horas_estimadas > 0:
+            eficiencia_global = (total_horas_estimadas / total_horas_reales * 100).round(1)
+            diferencia_horas = total_horas_reales - total_horas_estimadas
+        else:
+            eficiencia_global = 0
+            diferencia_horas = 0
+        
+        # En móviles, estas métricas se apilarán
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Horas Estimadas Totales", f"{total_horas_estimadas:.1f}")
+        
+        with col2:
+            st.metric("Horas Reales Totales", f"{total_horas_reales:.1f}")
+        
+        with col3:
+            st.metric("Diferencia", f"{diferencia_horas:.1f}", 
+                     delta=f"{diferencia_horas:.1f}")
+        
+        with col4:
+            st.metric("Eficiencia", f"{eficiencia_global}%")
+        
+        # Análisis adicional por proceso
+        st.subheader("📈 Análisis de Eficiencia por Proceso")
+        
+        # Calcular eficiencia por proceso
+        horas_por_proceso['eficiencia'] = (horas_por_proceso['horas_estimadas'] / horas_por_proceso['horas_reales'] * 100).round(1)
+        horas_por_proceso['diferencia'] = horas_por_proceso['horas_reales'] - horas_por_proceso['horas_estimadas']
+        
+        # Mostrar tabla de eficiencia
+        st.dataframe(
+            horas_por_proceso[[columna_proceso, 'horas_estimadas', 'horas_reales', 'diferencia', 'eficiencia']]
+            .sort_values('eficiencia', ascending=False)
+            .round(1),
+            use_container_width=True,
+            height=300
+        )
     
 else:
     st.error("No se encontraron datos de horas reales en la migración.")
@@ -463,8 +470,17 @@ with tab1:
 
 with tab2:
     st.subheader("Tabla Procesos")
+    # Buscar la columna de proceso
+    posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
+    columna_proceso = None
+    
+    for nombre in posibles_nombres:
+        if nombre in procesos_filtrados.columns:
+            columna_proceso = nombre
+            break
+    
     # Seleccionar columnas relevantes para mostrar
-    columnas_mostrar_procesos = ['ot', 'proceso', 'horas_estimadas', 'horas_reales', 'empleado_1', 'empleado_2']
+    columnas_mostrar_procesos = ['ot', columna_proceso, 'horas_estimadas', 'horas_reales', 'empleado_1', 'empleado_2']
     columnas_disponibles_procesos = [col for col in columnas_mostrar_procesos if col in procesos_filtrados.columns]
     
     st.dataframe(
