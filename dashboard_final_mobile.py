@@ -308,7 +308,7 @@ if not procesos_filtrados.empty:
         y=procesos_count.index,
         orientation='h',
         title="Top 10 Procesos más Frecuentes",
-        labels={'x': 'Frecuencia', 'y': 'Proceso'},
+        labels={'x': 'Frecuencia', 'y': 'proceso'},
         color=procesos_count.values
     )
     st.plotly_chart(fig, use_container_width=True)
