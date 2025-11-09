@@ -299,19 +299,33 @@ with col2:
     else:
         st.info("No hay datos para mostrar")
 
-# Gráfico de procesos
+# Gráfico de procesos - VERSIÓN MEJORADA
 st.subheader("🔧 Procesos más Comunes")
+
 if not procesos_filtrados.empty:
-    procesos_count = procesos_filtrados['proceso'].value_counts().head(10)
-    fig = px.bar(
-        x=procesos_count.values,
-        y=procesos_count.index,
-        orientation='h',
-        title="Top 10 Procesos más Frecuentes",
-        labels={'x': 'Frecuencia', 'y': 'proceso'},
-        color=procesos_count.values
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # Buscar la columna de procesos (diferentes nombres posibles)
+    posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
+    columna_proceso = None
+    
+    for nombre in posibles_nombres:
+        if nombre in procesos_filtrados.columns:
+            columna_proceso = nombre
+            break
+    
+    if columna_proceso:
+        procesos_count = procesos_filtrados[columna_proceso].value_counts().head(10)
+        fig = px.bar(
+            x=procesos_count.values,
+            y=procesos_count.index,
+            orientation='h',
+            title="Top 10 Procesos más Frecuentes",
+            labels={'x': 'Frecuencia', 'y': 'Proceso'},
+            color=procesos_count.values
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No se encontró la columna de procesos. Columnas disponibles:")
+        st.write(list(procesos_filtrados.columns))
 else:
     st.info("No hay datos de procesos para mostrar")
 
