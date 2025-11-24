@@ -52,24 +52,20 @@ st.markdown("---")
 def load_data():
     """Cargar datos desde Google Sheets"""
     try:
-        # REEMPLAZA ESTAS LÍNEAS:
-        # URLs CORREGIDAS para Google Sheets
+        # Sheet ID (la parte larga después de /d/)
         sheet_id = "17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN"
         
-        # URL para OT_MASTER (GID: 525532145)
+        # URLs CORREGIDAS - formato de exportación directa
         ot_master_csv = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=525532145"
-        
-        # URL para PROCESOS (GID: 240160734)  
         procesos_csv = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=240160734"
         
-        # Cargar datos desde Google Sheets
+        # Cargar datos
         ot_master = pd.read_csv(ot_master_csv)
         procesos = pd.read_csv(procesos_csv)
         
         return ot_master, procesos
     except Exception as e:
         st.error(f"Error al cargar los datos desde Google Sheets: {e}")
-        st.info("Asegúrate de que las URLs de Google Sheets sean correctas y estén publicadas")
         return None, None
 
 # Cargar datos
@@ -93,7 +89,7 @@ for col in date_columns_procesos:
     if col in procesos.columns:
         procesos[col] = pd.to_datetime(procesos[col], errors='coerce')
 
-# Filtros
+# Filtros principales
 clientes = ['Todos'] + sorted(ot_master['cliente'].dropna().unique().tolist())
 cliente_seleccionado = st.sidebar.selectbox("Cliente", clientes)
 
@@ -104,8 +100,19 @@ estatus_seleccionado = st.sidebar.selectbox("Estatus", estatus_options)
 ots = ["Todas"] + sorted(ot_master['ot'].astype(str).unique().tolist())
 ot_seleccionada = st.sidebar.selectbox("OT", ots)
 
+# NUEVO: Filtros de empleados
+st.sidebar.subheader("👥 Filtros por Empleados")
+
+# Obtener lista única de empleados de ambas columnas
+empleados_1 = procesos['empleado_1'].dropna().unique().tolist()
+empleados_2 = procesos['empleado_2'].dropna().unique().tolist()
+todos_empleados = list(set(empleados_1 + empleados_2))
+todos_empleados = ['Todos'] + sorted([emp for emp in todos_empleados if emp != ''])
+
+empleado_seleccionado = st.sidebar.selectbox("Empleado", todos_empleados)
+
 # Filtro de fechas
-st.sidebar.subheader("Filtro por Fecha de Entrega")
+st.sidebar.subheader("📅 Filtro por Fecha de Entrega")
 min_date = ot_master['fecha_entrega'].min()
 max_date = ot_master['fecha_entrega'].max()
 if pd.notna(min_date) and pd.notna(max_date):
@@ -132,6 +139,14 @@ if ot_seleccionada != 'Todas':
     ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['ot'] == ot_seleccionada]
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'] == ot_seleccionada]
 
+# NUEVO: Aplicar filtro de empleado
+if empleado_seleccionado != 'Todos':
+    procesos_filtrados = procesos_filtrados[
+        (procesos_filtrados['empleado_1'] == empleado_seleccionado) | 
+        (procesos_filtrados['empleado_2'] == empleado_seleccionado)
+    ]
+    ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['ot'].isin(procesos_filtrados['ot'])]
+
 if fecha_inicio and fecha_fin:
     ot_master_filtrado = ot_master_filtrado[
         (ot_master_filtrado['fecha_entrega'] >= pd.Timestamp(fecha_inicio)) &
@@ -140,13 +155,12 @@ if fecha_inicio and fecha_fin:
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'].isin(ot_master_filtrado['ot'])]
 
 # NUEVO: Definir estados que NO se consideran vencidos (estados finalizados)
-estados_no_vencidos = ['FACTURADO', 'OK', 'OK NO ENTREGADO']  # Agrega otros estados finalizados si es necesario
+estados_no_vencidos = ['FACTURADO', 'OK', 'OK NO ENTREGADO']
 
-# Calcular OTs vencidas y por vencer - CORREGIDO: Excluir estados finalizados
+# Calcular OTs vencidas y por vencer
 hoy = datetime.now()
 ot_master_filtrado['estado_entrega'] = ot_master_filtrado.apply(
     lambda row: 
-        # Si está en estado finalizado, no se considera vencida ni por vencer
         'Completada' if row['estatus'] in estados_no_vencidos else
         'Vencida' if pd.notna(row['fecha_entrega']) and row['fecha_entrega'] < hoy else 
         'Por vencer' if pd.notna(row['fecha_entrega']) and row['fecha_entrega'] >= hoy and row['fecha_entrega'] <= hoy + timedelta(days=7) else 
@@ -154,14 +168,27 @@ ot_master_filtrado['estado_entrega'] = ot_master_filtrado.apply(
     axis=1
 )
 
-# Métricas principales - En móviles se apilarán verticalmente
+# NUEVO: Calcular porcentaje de facturación
+total_ots = len(ot_master_filtrado)
+ots_facturadas = len(ot_master_filtrado[ot_master_filtrado['estatus'] == 'FACTURADO'])
+porcentaje_facturado = (ots_facturadas / total_ots * 100) if total_ots > 0 else 0
+
+# NUEVO: Identificar reprocesos (Garantías)
+if 'orden_compra' in ot_master_filtrado.columns:
+    ot_master_filtrado['es_reproceso'] = ot_master_filtrado['orden_compra'].str.contains('GARANTIA', case=False, na=False)
+    total_reprocesos = ot_master_filtrado['es_reproceso'].sum()
+    porcentaje_reprocesos = (total_reprocesos / total_ots * 100) if total_ots > 0 else 0
+else:
+    total_reprocesos = 0
+    porcentaje_reprocesos = 0
+
+# Métricas principales
 st.header("📊 Métricas Principales")
 
 # En móviles, streamlit apilará las columnas verticalmente
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
-    total_ots = len(ot_master_filtrado)
     st.metric("Total OTs", total_ots)
 
 with col2:
@@ -169,7 +196,6 @@ with col2:
     st.metric("OTs en Proceso", ots_en_proceso)
 
 with col3:
-    ots_facturadas = len(ot_master_filtrado[ot_master_filtrado['estatus'] == 'FACTURADO'])
     st.metric("OTs Facturadas", ots_facturadas)
 
 # CORREGIDO: Contar solo OTs vencidas que NO estén en estados finalizados
@@ -187,9 +213,87 @@ with col5:
     ])
     st.metric("OTs por Vencer", ots_por_vencer, delta=ots_por_vencer, delta_color="off")
 
+with col6:
+    st.metric("% Facturación", f"{porcentaje_facturado:.1f}%")
+
 st.markdown("---")
 
+# NUEVA SECCIÓN: GRÁFICO DE FACTURACIÓN
+st.header("💰 Porcentaje de Facturación")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # Gráfico de dona para facturación
+    fig_facturacion = px.pie(
+        values=[ots_facturadas, total_ots - ots_facturadas],
+        names=['Facturado', 'No Facturado'],
+        title="Total de OTs vs Facturado",
+        hole=0.4,
+        color=['Facturado', 'No Facturado'],
+        color_discrete_map={'Facturado': '#00CC96', 'No Facturado': '#EF553B'}
+    )
+    fig_facturacion.update_traces(textinfo='percent+label')
+    st.plotly_chart(fig_facturacion, use_container_width=True)
+
+with col2:
+    # Métricas detalladas de facturación
+    st.subheader("Detalle de Facturación")
+    st.metric("OTs Facturadas", ots_facturadas)
+    st.metric("OTs Pendientes", total_ots - ots_facturadas)
+    st.metric("Porcentaje de Facturación", f"{porcentaje_facturado:.1f}%")
+    
+    # Información adicional
+    st.info(f"""
+    **Resumen de Facturación:**
+    - Total OTs: {total_ots}
+    - Facturadas: {ots_facturadas}
+    - Pendientes: {total_ots - ots_facturadas}
+    - Eficiencia: {porcentaje_facturado:.1f}%
+    """)
+
+# NUEVA SECCIÓN: REPROCESOS
+st.markdown("---")
+st.header("🔄 Análisis de Reprocesos")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # Gráfico de reprocesos
+    if total_ots > 0:
+        fig_reprocesos = px.pie(
+            values=[total_reprocesos, total_ots - total_reprocesos],
+            names=['Reprocesos', 'OTs Normales'],
+            title="Distribución: OTs Normales vs Reprocesos",
+            hole=0.4,
+            color=['Reprocesos', 'OTs Normales'],
+            color_discrete_map={'Reprocesos': '#FFA15A', 'OTs Normales': '#636EFA'}
+        )
+        fig_reprocesos.update_traces(textinfo='percent+label')
+        st.plotly_chart(fig_reprocesos, use_container_width=True)
+
+with col2:
+    st.subheader("Métricas de Reprocesos")
+    st.metric("Total Reprocesos", total_reprocesos)
+    st.metric("OTs Normales", total_ots - total_reprocesos)
+    st.metric("% Reprocesos", f"{porcentaje_reprocesos:.1f}%")
+    
+    # Análisis de reprocesos
+    st.warning(f"""
+    **Análisis de Reprocesos:**
+    - Reprocesos identificados: {total_reprocesos}
+    - Tasa de reprocesos: {porcentaje_reprocesos:.1f}%
+    - OTs sin problemas: {total_ots - total_reprocesos}
+    """)
+
+# Detalle de reprocesos
+if total_reprocesos > 0 and 'es_reproceso' in ot_master_filtrado.columns:
+    st.subheader("📋 Detalle de Reprocesos (OTs con Garantía)")
+    reprocesos_detalle = ot_master_filtrado[ot_master_filtrado['es_reproceso'] == True][['ot', 'cliente', 'orden_compra', 'estatus']]
+    st.dataframe(reprocesos_detalle, use_container_width=True, height=200)
+
 # GRÁFICO PRINCIPAL: OTs VENCIDAS Y POR VENCER - CORREGIDO: Excluir estados finalizados
+st.markdown("---")
 st.header("📅 Estado de Entregas - OTs Vencidas y Por Vencer")
 
 # Contar OTs por estado de entrega, excluyendo estados finalizados para vencidas/por vencer
