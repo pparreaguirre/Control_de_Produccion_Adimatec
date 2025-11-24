@@ -54,12 +54,12 @@ def load_data():
     try:
         # URLs CORREGIDAS para Google Sheets
         # URL para OT_MASTER
-        ot_master_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=684102429"
-        ot_master_csv = ot_master_url.replace('/edit#gid=684102429', '/export?format=csv&gid=684102429')
+        ot_master_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=525532145"
+        ot_master_csv = ot_master_url.replace('/edit#gid=525532145', '/export?format=csv&gid=525532145')
         
         # URL para PROCESOS  
-        procesos_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=745949917"
-        procesos_csv = procesos_url.replace('/edit#gid=745949917', '/export?format=csv&gid=745949917')
+        procesos_url = "https://docs.google.com/spreadsheets/d/17eEYewfzoBZXkFWBm5DOJp3IuvHg9WvN/edit#gid=240160734"
+        procesos_csv = procesos_url.replace('/edit#gid=240160734', '/export?format=csv&gid=240160734')
         
         # Cargar datos desde Google Sheets
         ot_master = pd.read_csv(ot_master_csv)
