@@ -9,6 +9,9 @@ import requests
 from PIL import Image
 import io
 
+# Limpiar cache completo (agregar al principio del código)
+st.cache_data.clear()
+
 # Configuración de la página para móviles
 st.set_page_config(
     page_title="Dashboard de Producción - Adimatec",
