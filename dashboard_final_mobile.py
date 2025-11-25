@@ -100,14 +100,23 @@ estatus_seleccionado = st.sidebar.selectbox("Estatus", estatus_options)
 ots = ["Todas"] + sorted(ot_master['ot'].astype(str).unique().tolist())
 ot_seleccionada = st.sidebar.selectbox("OT", ots)
 
-# NUEVO: Filtros de empleados
+# CORREGIDO: Filtros de empleados SIN REPETIDOS
 st.sidebar.subheader("👥 Filtros por Empleados")
 
-# Obtener lista única de empleados de ambas columnas
-empleados_1 = procesos['empleado_1'].dropna().unique().tolist()
-empleados_2 = procesos['empleado_2'].dropna().unique().tolist()
-todos_empleados = list(set(empleados_1 + empleados_2))
-todos_empleados = ['Todos'] + sorted([emp for emp in todos_empleados if emp != ''])
+# Función para limpiar y normalizar nombres
+def limpiar_nombre(nombre):
+    if pd.isna(nombre):
+        return None
+    # Convertir a string, quitar espacios extras, y capitalizar
+    return str(nombre).strip().title()
+
+# Obtener lista única de empleados de ambas columnas (limpiando los nombres)
+empleados_1 = [limpiar_nombre(x) for x in procesos['empleado_1'].dropna().unique()]
+empleados_2 = [limpiar_nombre(x) for x in procesos['empleado_2'].dropna().unique()]
+
+# Combinar y eliminar duplicados y valores None
+todos_empleados = list(set([emp for emp in empleados_1 + empleados_2 if emp is not None]))
+todos_empleados = ['Todos'] + sorted(todos_empleados)
 
 empleado_seleccionado = st.sidebar.selectbox("Empleado", todos_empleados)
 
@@ -139,12 +148,20 @@ if ot_seleccionada != 'Todas':
     ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['ot'] == ot_seleccionada]
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'] == ot_seleccionada]
 
-# NUEVO: Aplicar filtro de empleado
+# CORREGIDO: Aplicar filtro de empleado (comparando con nombres limpios)
 if empleado_seleccionado != 'Todos':
-    procesos_filtrados = procesos_filtrados[
-        (procesos_filtrados['empleado_1'] == empleado_seleccionado) | 
-        (procesos_filtrados['empleado_2'] == empleado_seleccionado)
+    # Crear columnas temporales con nombres limpios para comparar
+    procesos_temp = procesos_filtrados.copy()
+    procesos_temp['empleado_1_clean'] = procesos_temp['empleado_1'].apply(limpiar_nombre)
+    procesos_temp['empleado_2_clean'] = procesos_temp['empleado_2'].apply(limpiar_nombre)
+    
+    procesos_filtrados = procesos_temp[
+        (procesos_temp['empleado_1_clean'] == empleado_seleccionado) | 
+        (procesos_temp['empleado_2_clean'] == empleado_seleccionado)
     ]
+    # Eliminar columnas temporales
+    procesos_filtrados = procesos_filtrados.drop(['empleado_1_clean', 'empleado_2_clean'], axis=1)
+    
     ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['ot'].isin(procesos_filtrados['ot'])]
 
 if fecha_inicio and fecha_fin:
@@ -154,7 +171,7 @@ if fecha_inicio and fecha_fin:
     ]
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'].isin(ot_master_filtrado['ot'])]
 
-# NUEVO: Definir estados que NO se consideran vencidos (estados finalizados)
+# Definir estados que NO se consideran vencidos (estados finalizados)
 estados_no_vencidos = ['FACTURADO', 'OK', 'OK NO ENTREGADO']
 
 # Calcular OTs vencidas y por vencer
@@ -168,12 +185,12 @@ ot_master_filtrado['estado_entrega'] = ot_master_filtrado.apply(
     axis=1
 )
 
-# NUEVO: Calcular porcentaje de facturación
+# Calcular porcentaje de facturación
 total_ots = len(ot_master_filtrado)
 ots_facturadas = len(ot_master_filtrado[ot_master_filtrado['estatus'] == 'FACTURADO'])
 porcentaje_facturado = (ots_facturadas / total_ots * 100) if total_ots > 0 else 0
 
-# NUEVO: Identificar reprocesos (Garantías)
+# Identificar reprocesos (Garantías)
 if 'orden_compra' in ot_master_filtrado.columns:
     ot_master_filtrado['es_reproceso'] = ot_master_filtrado['orden_compra'].str.contains('GARANTIA', case=False, na=False)
     total_reprocesos = ot_master_filtrado['es_reproceso'].sum()
@@ -182,10 +199,38 @@ else:
     total_reprocesos = 0
     porcentaje_reprocesos = 0
 
+# NUEVO: Calcular desviaciones de horas
+if 'horas_estimadas_ot' in ot_master_filtrado.columns and 'horas_reales_ot' in ot_master_filtrado.columns:
+    # Filtrar solo OTs con horas válidas
+    ot_con_horas = ot_master_filtrado[
+        (ot_master_filtrado['horas_estimadas_ot'].notna()) & 
+        (ot_master_filtrado['horas_reales_ot'].notna())
+    ].copy()
+    
+    # Calcular desviaciones
+    ot_con_horas['diferencia_horas'] = ot_con_horas['horas_reales_ot'] - ot_con_horas['horas_estimadas_ot']
+    ot_con_horas['tipo_desviacion'] = ot_con_horas['diferencia_horas'].apply(
+        lambda x: 'Desviación Positiva' if x <= 0 else 'Desviación Negativa'
+    )
+    
+    # Calcular totales
+    total_horas_programadas = ot_con_horas['horas_estimadas_ot'].sum()
+    horas_desviacion_positiva = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Positiva']['horas_reales_ot'].sum()
+    horas_desviacion_negativa = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Negativa']['horas_reales_ot'].sum()
+    
+    # Calcular porcentajes
+    porcentaje_positivo = (horas_desviacion_positiva / total_horas_programadas * 100) if total_horas_programadas > 0 else 0
+    porcentaje_negativo = (horas_desviacion_negativa / total_horas_programadas * 100) if total_horas_programadas > 0 else 0
+else:
+    total_horas_programadas = 0
+    horas_desviacion_positiva = 0
+    horas_desviacion_negativa = 0
+    porcentaje_positivo = 0
+    porcentaje_negativo = 0
+
 # Métricas principales
 st.header("📊 Métricas Principales")
 
-# En móviles, streamlit apilará las columnas verticalmente
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
@@ -198,7 +243,6 @@ with col2:
 with col3:
     st.metric("OTs Facturadas", ots_facturadas)
 
-# CORREGIDO: Contar solo OTs vencidas que NO estén en estados finalizados
 with col4:
     ots_vencidas = len(ot_master_filtrado[
         (ot_master_filtrado['estado_entrega'] == 'Vencida') & 
@@ -218,88 +262,10 @@ with col6:
 
 st.markdown("---")
 
-# NUEVA SECCIÓN: GRÁFICO DE FACTURACIÓN
-st.header("💰 Porcentaje de Facturación")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    # Gráfico de dona para facturación
-    fig_facturacion = px.pie(
-        values=[ots_facturadas, total_ots - ots_facturadas],
-        names=['Facturado', 'No Facturado'],
-        title="Total de OTs vs Facturado",
-        hole=0.4,
-        color=['Facturado', 'No Facturado'],
-        color_discrete_map={'Facturado': '#00CC96', 'No Facturado': '#EF553B'}
-    )
-    fig_facturacion.update_traces(textinfo='percent+label')
-    st.plotly_chart(fig_facturacion, use_container_width=True)
-
-with col2:
-    # Métricas detalladas de facturación
-    st.subheader("Detalle de Facturación")
-    st.metric("OTs Facturadas", ots_facturadas)
-    st.metric("OTs Pendientes", total_ots - ots_facturadas)
-    st.metric("Porcentaje de Facturación", f"{porcentaje_facturado:.1f}%")
-    
-    # Información adicional
-    st.info(f"""
-    **Resumen de Facturación:**
-    - Total OTs: {total_ots}
-    - Facturadas: {ots_facturadas}
-    - Pendientes: {total_ots - ots_facturadas}
-    - Eficiencia: {porcentaje_facturado:.1f}%
-    """)
-
-# NUEVA SECCIÓN: REPROCESOS
-st.markdown("---")
-st.header("🔄 Análisis de Reprocesos")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    # Gráfico de reprocesos
-    if total_ots > 0:
-        fig_reprocesos = px.pie(
-            values=[total_reprocesos, total_ots - total_reprocesos],
-            names=['Reprocesos', 'OTs Normales'],
-            title="Distribución: OTs Normales vs Reprocesos",
-            hole=0.4,
-            color=['Reprocesos', 'OTs Normales'],
-            color_discrete_map={'Reprocesos': '#FFA15A', 'OTs Normales': '#636EFA'}
-        )
-        fig_reprocesos.update_traces(textinfo='percent+label')
-        st.plotly_chart(fig_reprocesos, use_container_width=True)
-
-with col2:
-    st.subheader("Métricas de Reprocesos")
-    st.metric("Total Reprocesos", total_reprocesos)
-    st.metric("OTs Normales", total_ots - total_reprocesos)
-    st.metric("% Reprocesos", f"{porcentaje_reprocesos:.1f}%")
-    
-    # Análisis de reprocesos
-    st.warning(f"""
-    **Análisis de Reprocesos:**
-    - Reprocesos identificados: {total_reprocesos}
-    - Tasa de reprocesos: {porcentaje_reprocesos:.1f}%
-    - OTs sin problemas: {total_ots - total_reprocesos}
-    """)
-
-# Detalle de reprocesos
-if total_reprocesos > 0 and 'es_reproceso' in ot_master_filtrado.columns:
-    st.subheader("📋 Detalle de Reprocesos (OTs con Garantía)")
-    reprocesos_detalle = ot_master_filtrado[ot_master_filtrado['es_reproceso'] == True][['ot', 'cliente', 'orden_compra', 'estatus']]
-    st.dataframe(reprocesos_detalle, use_container_width=True, height=200)
-
-# GRÁFICO PRINCIPAL: OTs VENCIDAS Y POR VENCER - CORREGIDO: Excluir estados finalizados
-st.markdown("---")
+# GRÁFICO PRINCIPAL: OTs VENCIDAS Y POR VENCER
 st.header("📅 Estado de Entregas - OTs Vencidas y Por Vencer")
 
-# Contar OTs por estado de entrega, excluyendo estados finalizados para vencidas/por vencer
 estado_entrega_counts = ot_master_filtrado['estado_entrega'].value_counts()
-
-# Para el gráfico principal, mostrar solo vencidas y por vencer de OTs activas
 estados_interes = ['Vencida', 'Por vencer']
 estado_entrega_counts_filtrado = estado_entrega_counts[estado_entrega_counts.index.isin(estados_interes)]
 
@@ -326,12 +292,11 @@ if not estado_entrega_counts_filtrado.empty:
 else:
     st.info("No hay OTs vencidas o por vencer con los filtros actuales.")
 
-# Detalle de OTs vencidas y por vencer - CORREGIDO: Excluir estados finalizados
+# Detalle de OTs vencidas y por vencer
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📋 OTs Vencidas (Solo Activas)")
-    # CORREGIDO: Excluir OTs en estados finalizados
     ots_vencidas_df = ot_master_filtrado[
         (ot_master_filtrado['estado_entrega'] == 'Vencida') & 
         (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))
@@ -344,7 +309,6 @@ with col1:
 
 with col2:
     st.subheader("📋 OTs por Vencer (Próximos 7 días, Solo Activas)")
-    # CORREGIDO: Excluir OTs en estados finalizados
     ots_por_vencer_df = ot_master_filtrado[
         (ot_master_filtrado['estado_entrega'] == 'Por vencer') & 
         (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))
@@ -355,11 +319,10 @@ with col2:
     else:
         st.info("No hay OTs por vencer activas")
 
-# NUEVA SECCIÓN: Mostrar OTs completadas (FACTURADO, OK, etc.) por separado
+# OTs Completadas
 st.markdown("---")
 st.header("✅ OTs Completadas")
 
-# Filtrar OTs completadas
 ots_completadas_df = ot_master_filtrado[
     ot_master_filtrado['estatus'].isin(estados_no_vencidos)
 ][['ot', 'cliente', 'fecha_entrega', 'estatus', 'fecha_terminado']]
@@ -370,9 +333,47 @@ if not ots_completadas_df.empty:
 else:
     st.info("No hay OTs completadas con los filtros actuales")
 
+# MOVIDO: REPROCESOS después de OTs Completadas
 st.markdown("---")
+st.header("🔄 Análisis de Reprocesos")
 
-# Gráficos existentes - En móviles se apilarán
+col1, col2 = st.columns(2)
+
+with col1:
+    # Gráfico de reprocesos
+    if total_ots > 0:
+        fig_reprocesos = px.pie(
+            values=[total_reprocesos, total_ots - total_reprocesos],
+            names=['Reprocesos', 'OTs Normales'],
+            title="Distribución: OTs Normales vs Reprocesos",
+            hole=0.4,
+            color=['Reprocesos', 'OTs Normales'],
+            color_discrete_map={'Reprocesos': '#FFA15A', 'OTs Normales': '#636EFA'}
+        )
+        fig_reprocesos.update_traces(textinfo='percent+label')
+        st.plotly_chart(fig_reprocesos, use_container_width=True)
+
+with col2:
+    st.subheader("Métricas de Reprocesos")
+    st.metric("Total Reprocesos", total_reprocesos)
+    st.metric("OTs Normales", total_ots - total_reprocesos)
+    st.metric("% Reprocesos", f"{porcentaje_reprocesos:.1f}%")
+    
+    st.warning(f"""
+    **Análisis de Reprocesos:**
+    - Reprocesos identificados: {total_reprocesos}
+    - Tasa de reprocesos: {porcentaje_reprocesos:.1f}%
+    - OTs sin problemas: {total_ots - total_reprocesos}
+    """)
+
+# Detalle de reprocesos
+if total_reprocesos > 0 and 'es_reproceso' in ot_master_filtrado.columns:
+    st.subheader("📋 Detalle de Reprocesos (OTs con Garantía)")
+    reprocesos_detalle = ot_master_filtrado[ot_master_filtrado['es_reproceso'] == True][['ot', 'cliente', 'orden_compra', 'estatus']]
+    st.dataframe(reprocesos_detalle, use_container_width=True, height=200)
+
+# Gráficos existentes
+st.markdown("---")
 col1, col2 = st.columns(2)
 
 with col1:
@@ -403,11 +404,10 @@ with col2:
     else:
         st.info("No hay datos para mostrar")
 
-# Gráfico de procesos - VERSIÓN MEJORADA
+# Gráfico de procesos
 st.subheader("🔧 Procesos más Comunes")
 
 if not procesos_filtrados.empty:
-    # Buscar la columna de procesos (diferentes nombres posibles)
     posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
     columna_proceso = None
     
@@ -428,16 +428,14 @@ if not procesos_filtrados.empty:
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("No se encontró la columna de procesos. Columnas disponibles:")
-        st.write(list(procesos_filtrados.columns))
+        st.warning("No se encontró la columna de procesos.")
 else:
     st.info("No hay datos de procesos para mostrar")
 
-# GRÁFICO MEJORADO: Horas Estimadas vs Horas Reales (CON DATOS REALES)
+# Horas Estimadas vs Horas Reales
 st.subheader("⏰ Horas Estimadas vs Horas Reales por Proceso")
 
 if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns:
-    # Buscar la columna de proceso
     posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
     columna_proceso = None
     
@@ -447,19 +445,15 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
             break
     
     if columna_proceso:
-        # Agrupar por proceso y sumar horas estimadas y reales
         horas_por_proceso = procesos_filtrados.groupby(columna_proceso).agg({
             'horas_estimadas': 'sum',
             'horas_reales': 'sum'
         }).reset_index()
 
-        # Tomar los top 10 procesos por horas estimadas
         top_procesos = horas_por_proceso.nlargest(10, 'horas_estimadas')
 
-        # Crear gráfico de barras comparativo
         fig = go.Figure()
 
-        # Barras para horas estimadas
         fig.add_trace(go.Bar(
             name='Horas Estimadas',
             x=top_procesos[columna_proceso],
@@ -469,7 +463,6 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
             textposition='outside'
         ))
 
-        # Barras para horas reales
         fig.add_trace(go.Bar(
             name='Horas Reales',
             x=top_procesos[columna_proceso],
@@ -480,7 +473,7 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
         ))
 
         fig.update_layout(
-            title="Comparación: Horas Estimadas vs Reales por Proceso (Datos Reales)",
+            title="Comparación: Horas Estimadas vs Reales por Proceso",
             xaxis_title="Proceso",
             yaxis_title="Horas",
             barmode='group',
@@ -490,8 +483,8 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # Métricas de eficiencia con datos reales
-        st.subheader("📊 Eficiencia en Horas (Datos Reales)")
+        # Métricas de eficiencia
+        st.subheader("📊 Eficiencia en Horas")
         
         total_horas_estimadas = procesos_filtrados['horas_estimadas'].sum()
         total_horas_reales = procesos_filtrados['horas_reales'].sum()
@@ -503,7 +496,6 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
             eficiencia_global = 0
             diferencia_horas = 0
         
-        # En móviles, estas métricas se apilarán
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -513,32 +505,105 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
             st.metric("Horas Reales Totales", f"{total_horas_reales:.1f}")
         
         with col3:
-            st.metric("Diferencia", f"{diferencia_horas:.1f}", 
-                     delta=f"{diferencia_horas:.1f}")
+            st.metric("Diferencia", f"{diferencia_horas:.1f}")
         
         with col4:
             st.metric("Eficiencia", f"{eficiencia_global}%")
-        
-        # Análisis adicional por proceso
-        st.subheader("📈 Análisis de Eficiencia por Proceso")
-        
-        # Calcular eficiencia por proceso
-        horas_por_proceso['eficiencia'] = (horas_por_proceso['horas_estimadas'] / horas_por_proceso['horas_reales'] * 100).round(1)
-        horas_por_proceso['diferencia'] = horas_por_proceso['horas_reales'] - horas_por_proceso['horas_estimadas']
-        
-        # Mostrar tabla de eficiencia
-        st.dataframe(
-            horas_por_proceso[[columna_proceso, 'horas_estimadas', 'horas_reales', 'diferencia', 'eficiencia']]
-            .sort_values('eficiencia', ascending=False)
-            .round(1),
-            use_container_width=True,
-            height=300
-        )
-    
-else:
-    st.error("No se encontraron datos de horas reales en la migración.")
 
-# Tablas de datos
+# NUEVO: GRÁFICO DE DESVIACIONES DE HORAS
+st.markdown("---")
+st.header("📊 Desviaciones de Horas Programadas")
+
+if total_horas_programadas > 0:
+    # Crear datos para el gráfico
+    categorias = ['Horas Programadas', 'Desviaciones Positivas', 'Desviaciones Negativas']
+    valores = [total_horas_programadas, horas_desviacion_positiva, horas_desviacion_negativa]
+    colores = ['#1f77b4', '#2ca02c', '#d62728']
+    
+    # Gráfico de barras verticales
+    fig_desviaciones = go.Figure()
+    
+    fig_desviaciones.add_trace(go.Bar(
+        x=categorias,
+        y=valores,
+        marker_color=colores,
+        text=[f'{val:.1f}h' for val in valores],
+        textposition='outside',
+        hovertemplate='<b>%{x}</b><br>Horas: %{y:.1f}<extra></extra>'
+    ))
+    
+    fig_desviaciones.update_layout(
+        title="Comparación de Horas Programadas vs Desviaciones",
+        yaxis_title="Horas",
+        xaxis_title="",
+        showlegend=False,
+        height=500
+    )
+    
+    st.plotly_chart(fig_desviaciones, use_container_width=True)
+    
+    # Métricas de desviaciones
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Horas Programadas", f"{total_horas_programadas:.1f}h")
+    
+    with col2:
+        st.metric("Desviaciones Positivas", 
+                 f"{horas_desviacion_positiva:.1f}h", 
+                 f"{porcentaje_positivo:.1f}%")
+    
+    with col3:
+        st.metric("Desviaciones Negativas", 
+                 f"{horas_desviacion_negativa:.1f}h", 
+                 f"{porcentaje_negativo:.1f}%",
+                 delta_color="inverse")
+    
+    # Explicación
+    st.info("""
+    **Explicación de las Desviaciones:**
+    - **Horas Programadas**: Total de horas estimadas para todas las OTs
+    - **Desviaciones Positivas**: OTs que se completaron dentro o por debajo del tiempo programado
+    - **Desviaciones Negativas**: OTs que excedieron el tiempo programado
+    """)
+else:
+    st.warning("No hay datos suficientes de horas para mostrar las desviaciones")
+
+# MOVIDO: GRÁFICO DE FACTURACIÓN al final
+st.markdown("---")
+st.header("💰 Porcentaje de Facturación")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # Gráfico de dona para facturación
+    fig_facturacion = px.pie(
+        values=[ots_facturadas, total_ots - ots_facturadas],
+        names=['Facturado', 'No Facturado'],
+        title="Total de OTs vs Facturado",
+        hole=0.4,
+        color=['Facturado', 'No Facturado'],
+        color_discrete_map={'Facturado': '#00CC96', 'No Facturado': '#EF553B'}
+    )
+    fig_facturacion.update_traces(textinfo='percent+label')
+    st.plotly_chart(fig_facturacion, use_container_width=True)
+
+with col2:
+    # Métricas detalladas de facturación
+    st.subheader("Detalle de Facturación")
+    st.metric("OTs Facturadas", ots_facturadas)
+    st.metric("OTs Pendientes", total_ots - ots_facturadas)
+    st.metric("Porcentaje de Facturación", f"{porcentaje_facturado:.1f}%")
+    
+    st.info(f"""
+    **Resumen de Facturación:**
+    - Total OTs: {total_ots}
+    - Facturadas: {ots_facturadas}
+    - Pendientes: {total_ots - ots_facturadas}
+    - Eficiencia: {porcentaje_facturado:.1f}%
+    """)
+
+# Tablas de datos (se mantienen igual)
 st.markdown("---")
 st.header("📋 Datos Detallados")
 
@@ -546,7 +611,6 @@ tab1, tab2 = st.tabs(["OT Master", "Procesos"])
 
 with tab1:
     st.subheader("Tabla OT Master")
-    # Seleccionar columnas relevantes para mostrar
     columnas_mostrar = ['ot', 'descripcion', 'cliente', 'estatus', 'fecha_entrega', 'horas_estimadas_ot', 'horas_reales_ot']
     columnas_disponibles = [col for col in columnas_mostrar if col in ot_master_filtrado.columns]
     
@@ -556,7 +620,6 @@ with tab1:
         hide_index=True
     )
     
-    # Opción de descarga
     csv_ot = ot_master_filtrado.to_csv(index=False)
     st.download_button(
         label="📥 Descargar OT Master como CSV",
@@ -567,7 +630,6 @@ with tab1:
 
 with tab2:
     st.subheader("Tabla Procesos")
-    # Buscar la columna de proceso
     posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
     columna_proceso = None
     
@@ -576,7 +638,6 @@ with tab2:
             columna_proceso = nombre
             break
     
-    # Seleccionar columnas relevantes para mostrar
     columnas_mostrar_procesos = ['ot', columna_proceso, 'horas_estimadas', 'horas_reales', 'empleado_1', 'empleado_2']
     columnas_disponibles_procesos = [col for col in columnas_mostrar_procesos if col in procesos_filtrados.columns]
     
@@ -586,7 +647,6 @@ with tab2:
         hide_index=True
     )
     
-    # Opción de descarga
     csv_procesos = procesos_filtrados.to_csv(index=False)
     st.download_button(
         label="📥 Descargar Procesos como CSV",
