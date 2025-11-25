@@ -74,6 +74,10 @@ ot_master, procesos = load_data()
 if ot_master is None or procesos is None:
     st.stop()
 
+# CORREGIDO: Asegurar que la columna 'ot' sea string en ambos dataframes desde el inicio
+ot_master['ot'] = ot_master['ot'].astype(str)
+procesos['ot'] = procesos['ot'].astype(str)
+
 # Sidebar con filtros
 st.sidebar.header("🔍 Filtros")
 
@@ -96,7 +100,7 @@ cliente_seleccionado = st.sidebar.selectbox("Cliente", clientes)
 estatus_options = ['Todos'] + sorted(ot_master['estatus'].dropna().unique().tolist())
 estatus_seleccionado = st.sidebar.selectbox("Estatus", estatus_options)
 
-# Filtro de OT
+# Filtro de OT - CORREGIDO: Asegurar tipo de dato consistente
 ots = ["Todas"] + sorted(ot_master['ot'].astype(str).unique().tolist())
 ot_seleccionada = st.sidebar.selectbox("OT", ots)
 
@@ -132,7 +136,7 @@ else:
     fecha_inicio = None
     fecha_fin = None
 
-# Aplicar filtros
+# CORREGIDO: Aplicar filtros de manera consistente
 ot_master_filtrado = ot_master.copy()
 procesos_filtrados = procesos.copy()
 
@@ -144,6 +148,7 @@ if estatus_seleccionado != 'Todos':
     ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['estatus'] == estatus_seleccionado]
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'].isin(ot_master_filtrado['ot'])]
 
+# CORREGIDO: Filtro de OT - Aplicar a ambos dataframes de manera consistente
 if ot_seleccionada != 'Todas':
     ot_master_filtrado = ot_master_filtrado[ot_master_filtrado['ot'] == ot_seleccionada]
     procesos_filtrados = procesos_filtrados[procesos_filtrados['ot'] == ot_seleccionada]
@@ -341,7 +346,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     # Gráfico de reprocesos
-    if total_ots > 0:
+    if total_ots > 0 and total_reprocesos > 0:
         fig_reprocesos = px.pie(
             values=[total_reprocesos, total_ots - total_reprocesos],
             names=['Reprocesos', 'OTs Normales'],
@@ -352,6 +357,8 @@ with col1:
         )
         fig_reprocesos.update_traces(textinfo='percent+label')
         st.plotly_chart(fig_reprocesos, use_container_width=True)
+    else:
+        st.info("No hay reprocesos para mostrar")
 
 with col2:
     st.subheader("Métricas de Reprocesos")
@@ -359,12 +366,15 @@ with col2:
     st.metric("OTs Normales", total_ots - total_reprocesos)
     st.metric("% Reprocesos", f"{porcentaje_reprocesos:.1f}%")
     
-    st.warning(f"""
-    **Análisis de Reprocesos:**
-    - Reprocesos identificados: {total_reprocesos}
-    - Tasa de reprocesos: {porcentaje_reprocesos:.1f}%
-    - OTs sin problemas: {total_ots - total_reprocesos}
-    """)
+    if total_reprocesos > 0:
+        st.warning(f"""
+        **Análisis de Reprocesos:**
+        - Reprocesos identificados: {total_reprocesos}
+        - Tasa de reprocesos: {porcentaje_reprocesos:.1f}%
+        - OTs sin problemas: {total_ots - total_reprocesos}
+        """)
+    else:
+        st.success("✅ No se han identificado reprocesos")
 
 # Detalle de reprocesos
 if total_reprocesos > 0 and 'es_reproceso' in ot_master_filtrado.columns:
@@ -378,29 +388,35 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📈 OTs por Cliente")
-    if not ot_master_filtrado.empty:
+    if not ot_master_filtrado.empty and 'cliente' in ot_master_filtrado.columns:
         ots_por_cliente = ot_master_filtrado['cliente'].value_counts()
-        fig = px.pie(
-            values=ots_por_cliente.values,
-            names=ots_por_cliente.index,
-            title="Distribución de OTs por Cliente"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if not ots_por_cliente.empty:
+            fig = px.pie(
+                values=ots_por_cliente.values,
+                names=ots_por_cliente.index,
+                title="Distribución de OTs por Cliente"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay datos de clientes para mostrar")
     else:
         st.info("No hay datos para mostrar")
 
 with col2:
     st.subheader("🎯 OTs por Estatus")
-    if not ot_master_filtrado.empty:
+    if not ot_master_filtrado.empty and 'estatus' in ot_master_filtrado.columns:
         ots_por_estatus = ot_master_filtrado['estatus'].value_counts()
-        fig = px.bar(
-            x=ots_por_estatus.index,
-            y=ots_por_estatus.values,
-            title="OTs por Estado",
-            labels={'x': 'Estatus', 'y': 'Cantidad'},
-            color=ots_por_estatus.index
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if not ots_por_estatus.empty:
+            fig = px.bar(
+                x=ots_por_estatus.index,
+                y=ots_por_estatus.values,
+                title="OTs por Estado",
+                labels={'x': 'Estatus', 'y': 'Cantidad'},
+                color=ots_por_estatus.index
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay datos de estatus para mostrar")
     else:
         st.info("No hay datos para mostrar")
 
@@ -416,19 +432,22 @@ if not procesos_filtrados.empty:
             columna_proceso = nombre
             break
     
-    if columna_proceso:
+    if columna_proceso and not procesos_filtrados[columna_proceso].empty:
         procesos_count = procesos_filtrados[columna_proceso].value_counts().head(10)
-        fig = px.bar(
-            x=procesos_count.values,
-            y=procesos_count.index,
-            orientation='h',
-            title="Top 10 Procesos más Frecuentes",
-            labels={'x': 'Frecuencia', 'y': 'Proceso'},
-            color=procesos_count.values
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if not procesos_count.empty:
+            fig = px.bar(
+                x=procesos_count.values,
+                y=procesos_count.index,
+                orientation='h',
+                title="Top 10 Procesos más Frecuentes",
+                labels={'x': 'Frecuencia', 'y': 'Proceso'},
+                color=procesos_count.values
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hay datos de procesos para mostrar")
     else:
-        st.warning("No se encontró la columna de procesos.")
+        st.info("No se encontró la columna de procesos")
 else:
     st.info("No hay datos de procesos para mostrar")
 
@@ -450,65 +469,72 @@ if not procesos_filtrados.empty and 'horas_reales' in procesos_filtrados.columns
             'horas_reales': 'sum'
         }).reset_index()
 
-        top_procesos = horas_por_proceso.nlargest(10, 'horas_estimadas')
+        if not horas_por_proceso.empty:
+            top_procesos = horas_por_proceso.nlargest(10, 'horas_estimadas')
 
-        fig = go.Figure()
+            fig = go.Figure()
 
-        fig.add_trace(go.Bar(
-            name='Horas Estimadas',
-            x=top_procesos[columna_proceso],
-            y=top_procesos['horas_estimadas'],
-            marker_color='#1f77b4',
-            text=top_procesos['horas_estimadas'].round(1),
-            textposition='outside'
-        ))
+            fig.add_trace(go.Bar(
+                name='Horas Estimadas',
+                x=top_procesos[columna_proceso],
+                y=top_procesos['horas_estimadas'],
+                marker_color='#1f77b4',
+                text=top_procesos['horas_estimadas'].round(1),
+                textposition='outside'
+            ))
 
-        fig.add_trace(go.Bar(
-            name='Horas Reales',
-            x=top_procesos[columna_proceso],
-            y=top_procesos['horas_reales'],
-            marker_color='#ff7f0e',
-            text=top_procesos['horas_reales'].round(1),
-            textposition='outside'
-        ))
+            fig.add_trace(go.Bar(
+                name='Horas Reales',
+                x=top_procesos[columna_proceso],
+                y=top_procesos['horas_reales'],
+                marker_color='#ff7f0e',
+                text=top_procesos['horas_reales'].round(1),
+                textposition='outside'
+            ))
 
-        fig.update_layout(
-            title="Comparación: Horas Estimadas vs Reales por Proceso",
-            xaxis_title="Proceso",
-            yaxis_title="Horas",
-            barmode='group',
-            height=500,
-            showlegend=True
-        )
+            fig.update_layout(
+                title="Comparación: Horas Estimadas vs Reales por Proceso",
+                xaxis_title="Proceso",
+                yaxis_title="Horas",
+                barmode='group',
+                height=500,
+                showlegend=True
+            )
 
-        st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Métricas de eficiencia
-        st.subheader("📊 Eficiencia en Horas")
-        
-        total_horas_estimadas = procesos_filtrados['horas_estimadas'].sum()
-        total_horas_reales = procesos_filtrados['horas_reales'].sum()
-        
-        if total_horas_estimadas > 0:
-            eficiencia_global = (total_horas_estimadas / total_horas_reales * 100).round(1)
-            diferencia_horas = total_horas_reales - total_horas_estimadas
+            # Métricas de eficiencia
+            st.subheader("📊 Eficiencia en Horas")
+            
+            total_horas_estimadas = procesos_filtrados['horas_estimadas'].sum()
+            total_horas_reales = procesos_filtrados['horas_reales'].sum()
+            
+            if total_horas_estimadas > 0:
+                eficiencia_global = (total_horas_estimadas / total_horas_reales * 100).round(1)
+                diferencia_horas = total_horas_reales - total_horas_estimadas
+            else:
+                eficiencia_global = 0
+                diferencia_horas = 0
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Horas Estimadas Totales", f"{total_horas_estimadas:.1f}")
+            
+            with col2:
+                st.metric("Horas Reales Totales", f"{total_horas_reales:.1f}")
+            
+            with col3:
+                st.metric("Diferencia", f"{diferencia_horas:.1f}")
+            
+            with col4:
+                st.metric("Eficiencia", f"{eficiencia_global}%")
         else:
-            eficiencia_global = 0
-            diferencia_horas = 0
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Horas Estimadas Totales", f"{total_horas_estimadas:.1f}")
-        
-        with col2:
-            st.metric("Horas Reales Totales", f"{total_horas_reales:.1f}")
-        
-        with col3:
-            st.metric("Diferencia", f"{diferencia_horas:.1f}")
-        
-        with col4:
-            st.metric("Eficiencia", f"{eficiencia_global}%")
+            st.info("No hay datos de horas para mostrar")
+    else:
+        st.info("No se encontró la columna de procesos")
+else:
+    st.info("No hay datos de horas reales disponibles")
 
 # NUEVO: GRÁFICO DE DESVIACIONES DE HORAS
 st.markdown("---")
@@ -577,16 +603,19 @@ col1, col2 = st.columns(2)
 
 with col1:
     # Gráfico de dona para facturación
-    fig_facturacion = px.pie(
-        values=[ots_facturadas, total_ots - ots_facturadas],
-        names=['Facturado', 'No Facturado'],
-        title="Total de OTs vs Facturado",
-        hole=0.4,
-        color=['Facturado', 'No Facturado'],
-        color_discrete_map={'Facturado': '#00CC96', 'No Facturado': '#EF553B'}
-    )
-    fig_facturacion.update_traces(textinfo='percent+label')
-    st.plotly_chart(fig_facturacion, use_container_width=True)
+    if total_ots > 0:
+        fig_facturacion = px.pie(
+            values=[ots_facturadas, total_ots - ots_facturadas],
+            names=['Facturado', 'No Facturado'],
+            title="Total de OTs vs Facturado",
+            hole=0.4,
+            color=['Facturado', 'No Facturado'],
+            color_discrete_map={'Facturado': '#00CC96', 'No Facturado': '#EF553B'}
+        )
+        fig_facturacion.update_traces(textinfo='percent+label')
+        st.plotly_chart(fig_facturacion, use_container_width=True)
+    else:
+        st.info("No hay OTs para mostrar el gráfico de facturación")
 
 with col2:
     # Métricas detalladas de facturación
@@ -595,15 +624,18 @@ with col2:
     st.metric("OTs Pendientes", total_ots - ots_facturadas)
     st.metric("Porcentaje de Facturación", f"{porcentaje_facturado:.1f}%")
     
-    st.info(f"""
-    **Resumen de Facturación:**
-    - Total OTs: {total_ots}
-    - Facturadas: {ots_facturadas}
-    - Pendientes: {total_ots - ots_facturadas}
-    - Eficiencia: {porcentaje_facturado:.1f}%
-    """)
+    if total_ots > 0:
+        st.info(f"""
+        **Resumen de Facturación:**
+        - Total OTs: {total_ots}
+        - Facturadas: {ots_facturadas}
+        - Pendientes: {total_ots - ots_facturadas}
+        - Eficiencia: {porcentaje_facturado:.1f}%
+        """)
+    else:
+        st.info("No hay OTs para mostrar el resumen de facturación")
 
-# Tablas de datos (se mantienen igual)
+# Tablas de datos
 st.markdown("---")
 st.header("📋 Datos Detallados")
 
@@ -614,19 +646,22 @@ with tab1:
     columnas_mostrar = ['ot', 'descripcion', 'cliente', 'estatus', 'fecha_entrega', 'horas_estimadas_ot', 'horas_reales_ot']
     columnas_disponibles = [col for col in columnas_mostrar if col in ot_master_filtrado.columns]
     
-    st.dataframe(
-        ot_master_filtrado[columnas_disponibles],
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    csv_ot = ot_master_filtrado.to_csv(index=False)
-    st.download_button(
-        label="📥 Descargar OT Master como CSV",
-        data=csv_ot,
-        file_name="ot_master_filtrado.csv",
-        mime="text/csv"
-    )
+    if not ot_master_filtrado.empty:
+        st.dataframe(
+            ot_master_filtrado[columnas_disponibles],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        csv_ot = ot_master_filtrado.to_csv(index=False)
+        st.download_button(
+            label="📥 Descargar OT Master como CSV",
+            data=csv_ot,
+            file_name="ot_master_filtrado.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No hay datos para mostrar en OT Master")
 
 with tab2:
     st.subheader("Tabla Procesos")
@@ -641,19 +676,22 @@ with tab2:
     columnas_mostrar_procesos = ['ot', columna_proceso, 'horas_estimadas', 'horas_reales', 'empleado_1', 'empleado_2']
     columnas_disponibles_procesos = [col for col in columnas_mostrar_procesos if col in procesos_filtrados.columns]
     
-    st.dataframe(
-        procesos_filtrados[columnas_disponibles_procesos],
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    csv_procesos = procesos_filtrados.to_csv(index=False)
-    st.download_button(
-        label="📥 Descargar Procesos como CSV",
-        data=csv_procesos,
-        file_name="procesos_filtrados.csv",
-        mime="text/csv"
-    )
+    if not procesos_filtrados.empty:
+        st.dataframe(
+            procesos_filtrados[columnas_disponibles_procesos],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        csv_procesos = procesos_filtrados.to_csv(index=False)
+        st.download_button(
+            label="📥 Descargar Procesos como CSV",
+            data=csv_procesos,
+            file_name="procesos_filtrados.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No hay datos para mostrar en Procesos")
 
 # Footer
 st.markdown("---")
