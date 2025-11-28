@@ -1,4 +1,4 @@
-# dashboard_final_mobile.py
+# dashboard_completo.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -8,17 +8,13 @@ import numpy as np
 import requests
 from PIL import Image
 import io
-
-# Nuevos imports para PowerPoint
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
-from pptx.dml.color import RGBColor
-import tempfile
-import zipfile
 import os
+from pptx import Presentation
+from pptx.util import Inches
 
-# Configuración de la página para móviles
+# =============================================
+# CONFIGURACIÓN STREAMLIT
+# =============================================
 st.set_page_config(
     page_title="Dashboard de Producción - Adimatec",
     page_icon="🏭",
@@ -26,14 +22,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Limpiar cache para desarrollo
+# Limpiar cache
 st.cache_data.clear()
 
 # Cargar logo
 @st.cache_data
 def load_logo(url):
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         image = Image.open(io.BytesIO(response.content))
         return image
     except:
@@ -60,7 +56,7 @@ with col_icon:
 
 st.markdown("---")
 
-@st.cache_data(ttl=300)  # 5 minutos para testing
+@st.cache_data(ttl=300, show_spinner="Cargando datos desde Google Sheets...")
 def load_data():
     """Cargar datos desde Google Sheets"""
     try:
@@ -80,10 +76,12 @@ def load_data():
         st.error(f"Error al cargar los datos desde Google Sheets: {e}")
         return None, None
 
-# Cargar datos
-ot_master, procesos = load_data()
+# Cargar datos con spinner
+with st.spinner("Cargando datos desde Google Sheets..."):
+    ot_master, procesos = load_data()
 
 if ot_master is None or procesos is None:
+    st.error("No se pudieron cargar los datos. Por favor, verifica la conexión e intenta nuevamente.")
     st.stop()
 
 # Asegurar que la columna 'ot' sea string en ambos dataframes
@@ -215,18 +213,32 @@ else:
     porcentaje_reprocesos = 0
 
 # Calcular desviaciones de horas
+ots_desviacion_positiva = pd.DataFrame()
+ots_desviacion_negativa = pd.DataFrame()
+
 if 'horas_estimadas_ot' in ot_master_filtrado.columns and 'horas_reales_ot' in ot_master_filtrado.columns:
+    # Filtrar solo OTs con horas válidas
     ot_con_horas = ot_master_filtrado[
         (ot_master_filtrado['horas_estimadas_ot'].notna()) & 
         (ot_master_filtrado['horas_reales_ot'].notna())
     ].copy()
+    
+    # Calcular desviaciones
     ot_con_horas['diferencia_horas'] = ot_con_horas['horas_reales_ot'] - ot_con_horas['horas_estimadas_ot']
     ot_con_horas['tipo_desviacion'] = ot_con_horas['diferencia_horas'].apply(
         lambda x: 'Desviación Positiva' if x <= 0 else 'Desviación Negativa'
     )
+    
+    # Separar en DataFrames para desviaciones positivas y negativas
+    ots_desviacion_positiva = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Positiva'].copy()
+    ots_desviacion_negativa = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Negativa'].copy()
+    
+    # Calcular totales
     total_horas_programadas = ot_con_horas['horas_estimadas_ot'].sum()
-    horas_desviacion_positiva = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Positiva']['horas_reales_ot'].sum()
-    horas_desviacion_negativa = ot_con_horas[ot_con_horas['tipo_desviacion'] == 'Desviación Negativa']['horas_reales_ot'].sum()
+    horas_desviacion_positiva = ots_desviacion_positiva['horas_reales_ot'].sum()
+    horas_desviacion_negativa = ots_desviacion_negativa['horas_reales_ot'].sum()
+    
+    # Calcular porcentajes
     porcentaje_positivo = (horas_desviacion_positiva / total_horas_programadas * 100) if total_horas_programadas > 0 else 0
     porcentaje_negativo = (horas_desviacion_negativa / total_horas_programadas * 100) if total_horas_programadas > 0 else 0
 else:
@@ -239,18 +251,21 @@ else:
 # Métricas principales
 st.header("📊 Métricas Principales")
 col1, col2, col3, col4, col5, col6 = st.columns(6)
-with col1: st.metric("Total OTs", total_ots)
+with col1: 
+    st.metric("Total OTs", total_ots)
 with col2: 
     ots_en_proceso = len(ot_master_filtrado[ot_master_filtrado['estatus'] == 'EN PROCESO'])
     st.metric("OTs en Proceso", ots_en_proceso)
-with col3: st.metric("OTs Facturadas", ots_facturadas)
+with col3:
+    st.metric("OTs Facturadas", ots_facturadas, f"{porcentaje_facturado:.1f}%")
 with col4: 
     ots_vencidas = len(ot_master_filtrado[(ot_master_filtrado['estado_entrega'] == 'Vencida') & (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))])
     st.metric("OTs Vencidas", ots_vencidas, delta=-ots_vencidas, delta_color="inverse")
 with col5: 
     ots_por_vencer = len(ot_master_filtrado[(ot_master_filtrado['estado_entrega'] == 'Por vencer') & (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))])
     st.metric("OTs por Vencer", ots_por_vencer, delta=ots_por_vencer, delta_color="off")
-with col6: st.metric("% Facturación", f"{porcentaje_facturado:.1f}%")
+with col6:
+    st.metric("Reprocesos", total_reprocesos, f"{porcentaje_reprocesos:.1f}%")
 
 st.markdown("---")
 
@@ -260,7 +275,6 @@ estado_entrega_counts = ot_master_filtrado['estado_entrega'].value_counts()
 estados_interes = ['Vencida', 'Por vencer']
 estado_entrega_counts_filtrado = estado_entrega_counts[estado_entrega_counts.index.isin(estados_interes)]
 
-fig_ots_vencidas = None
 if not estado_entrega_counts_filtrado.empty:
     fig_ots_vencidas = px.bar(
         x=estado_entrega_counts_filtrado.index,
@@ -282,27 +296,32 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("📋 OTs Vencidas (Solo Activas)")
     ots_vencidas_df = ot_master_filtrado[(ot_master_filtrado['estado_entrega'] == 'Vencida') & (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))][['ot', 'cliente', 'fecha_entrega', 'estatus']]
-    if not ots_vencidas_df.empty: st.dataframe(ots_vencidas_df, use_container_width=True, height=200)
-    else: st.info("No hay OTs vencidas activas")
+    if not ots_vencidas_df.empty: 
+        st.dataframe(ots_vencidas_df, use_container_width=True, height=200)
+    else: 
+        st.info("No hay OTs vencidas activas")
 with col2:
     st.subheader("📋 OTs por Vencer (Próximos 7 días, Solo Activas)")
     ots_por_vencer_df = ot_master_filtrado[(ot_master_filtrado['estado_entrega'] == 'Por vencer') & (~ot_master_filtrado['estatus'].isin(estados_no_vencidos))][['ot', 'cliente', 'fecha_entrega', 'estatus']]
-    if not ots_por_vencer_df.empty: st.dataframe(ots_por_vencer_df, use_container_width=True, height=200)
-    else: st.info("No hay OTs por vencer activas")
+    if not ots_por_vencer_df.empty: 
+        st.dataframe(ots_por_vencer_df, use_container_width=True, height=200)
+    else: 
+        st.info("No hay OTs por vencer activas")
 
 # OTs Completadas
 st.markdown("---")
 st.header("✅ OTs Completadas")
 ots_completadas_df = ot_master_filtrado[ot_master_filtrado['estatus'].isin(estados_no_vencidos)][['ot', 'cliente', 'fecha_entrega', 'estatus', 'fecha_terminado']]
-if not ots_completadas_df.empty: st.dataframe(ots_completadas_df, use_container_width=True, height=200)
-else: st.info("No hay OTs completadas con los filtros actuales")
+if not ots_completadas_df.empty: 
+    st.dataframe(ots_completadas_df, use_container_width=True, height=200)
+else: 
+    st.info("No hay OTs completadas con los filtros actuales")
 
 # REPROCESOS después de OTs Completadas
 st.markdown("---")
 st.header("🔄 Análisis de Reprocesos")
 col1, col2 = st.columns(2)
 
-fig_reprocesos = None
 with col1:
     if total_ots > 0 and total_reprocesos > 0:
         fig_reprocesos = px.pie(
@@ -315,13 +334,16 @@ with col1:
         )
         fig_reprocesos.update_traces(textinfo='percent+label')
         st.plotly_chart(fig_reprocesos, use_container_width=True)
-    else: st.info("No hay reprocesos para mostrar")
+    else: 
+        st.info("No hay reprocesos para mostrar")
 with col2:
     st.metric("Total Reprocesos", total_reprocesos)
     st.metric("OTs Normales", total_ots - total_reprocesos)
     st.metric("% Reprocesos", f"{porcentaje_reprocesos:.1f}%")
-    if total_reprocesos > 0: st.warning(f"Reprocesos identificados: {total_reprocesos} ({porcentaje_reprocesos:.1f}%)")
-    else: st.success("✅ No se han identificado reprocesos")
+    if total_reprocesos > 0: 
+        st.warning(f"Reprocesos identificados: {total_reprocesos} ({porcentaje_reprocesos:.1f}%)")
+    else: 
+        st.success("✅ No se han identificado reprocesos")
 
 # Gráficos existentes
 st.markdown("---")
@@ -333,8 +355,10 @@ with col1:
         if not ots_por_cliente.empty:
             fig_clientes = px.pie(values=ots_por_cliente.values, names=ots_por_cliente.index, title="Distribución de OTs por Cliente")
             st.plotly_chart(fig_clientes, use_container_width=True)
-        else: st.info("No hay datos de clientes para mostrar")
-    else: st.info("No hay datos para mostrar")
+        else: 
+            st.info("No hay datos de clientes para mostrar")
+    else: 
+        st.info("No hay datos para mostrar")
 with col2:
     st.subheader("🎯 OTs por Estatus")
     if not ot_master_filtrado.empty and 'estatus' in ot_master_filtrado.columns:
@@ -342,14 +366,15 @@ with col2:
         if not ots_por_estatus.empty:
             fig_estatus = px.bar(x=ots_por_estatus.index, y=ots_por_estatus.values, title="OTs por Estado", labels={'x': 'Estatus', 'y': 'Cantidad'}, color=ots_por_estatus.index)
             st.plotly_chart(fig_estatus, use_container_width=True)
-        else: st.info("No hay datos de estatus para mostrar")
-    else: st.info("No hay datos para mostrar")
+        else: 
+            st.info("No hay datos de estatus para mostrar")
+    else: 
+        st.info("No hay datos para mostrar")
 
-# NUEVO: GRÁFICO DE DESVIACIONES DE HORAS
+# GRÁFICO DE DESVIACIONES DE HORAS
 st.markdown("---")
 st.header("📊 Desviaciones de Horas Programadas")
 
-fig_desviaciones = None
 if total_horas_programadas > 0:
     categorias = ['Horas Programadas', 'Desviaciones Positivas', 'Desviaciones Negativas']
     valores = [total_horas_programadas, horas_desviacion_positiva, horas_desviacion_negativa]
@@ -361,17 +386,157 @@ if total_horas_programadas > 0:
     st.plotly_chart(fig_desviaciones, use_container_width=True)
     
     col1, col2, col3 = st.columns(3)
-    with col1: st.metric("Total Horas Programadas", f"{total_horas_programadas:.1f}h")
-    with col2: st.metric("Desviaciones Positivas", f"{horas_desviacion_positiva:.1f}h", f"{porcentaje_positivo:.1f}%")
-    with col3: st.metric("Desviaciones Negativas", f"{horas_desviacion_negativa:.1f}h", f"{porcentaje_negativo:.1f}%", delta_color="inverse")
-else: st.warning("No hay datos suficientes de horas para mostrar las desviaciones")
+    with col1: 
+        st.metric("Total Horas Programadas", f"{total_horas_programadas:.1f}h")
+    with col2: 
+        st.metric("Desviaciones Positivas", f"{horas_desviacion_positiva:.1f}h", f"{porcentaje_positivo:.1f}%")
+    with col3: 
+        st.metric("Desviaciones Negativas", f"{horas_desviacion_negativa:.1f}h", f"{porcentaje_negativo:.1f}%", delta_color="inverse")
+else: 
+    st.warning("No hay datos suficientes de horas para mostrar las desviaciones")
+
+# DETALLE DE OTs CON DESVIACIONES
+st.markdown("---")
+st.header("📋 Detalle de OTs con Desviaciones")
+
+if not ots_desviacion_positiva.empty or not ots_desviacion_negativa.empty:
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("✅ OTs con Desviaciones Positivas")
+        st.info("OTs que cumplieron o mejoraron el tiempo estimado")
+        if not ots_desviacion_positiva.empty:
+            columnas_positivas = ['ot', 'cliente', 'horas_estimadas_ot', 'horas_reales_ot', 'diferencia_horas']
+            columnas_disponibles = [col for col in columnas_positivas if col in ots_desviacion_positiva.columns]
+            
+            df_positivas_display = ots_desviacion_positiva[columnas_disponibles].copy()
+            if 'diferencia_horas' in df_positivas_display.columns:
+                df_positivas_display['diferencia_horas'] = df_positivas_display['diferencia_horas'].abs()
+                df_positivas_display = df_positivas_display.rename(columns={'diferencia_horas': 'horas_ahorradas'})
+            
+            st.dataframe(df_positivas_display.sort_values('horas_ahorradas' if 'horas_ahorradas' in df_positivas_display.columns else 'ot'), 
+                        use_container_width=True, height=300)
+            st.caption(f"Total OTs con desviaciones positivas: {len(ots_desviacion_positiva)}")
+        else:
+            st.info("No hay OTs con desviaciones positivas")
+    
+    with col2:
+        st.subheader("⚠️ OTs con Desviaciones Negativas")
+        st.warning("OTs que excedieron el tiempo estimado")
+        if not ots_desviacion_negativa.empty:
+            columnas_negativas = ['ot', 'cliente', 'horas_estimadas_ot', 'horas_reales_ot', 'diferencia_horas']
+            columnas_disponibles = [col for col in columnas_negativas if col in ots_desviacion_negativa.columns]
+            
+            st.dataframe(ots_desviacion_negativa[columnas_disponibles].sort_values('diferencia_horas', ascending=False), 
+                        use_container_width=True, height=300)
+            st.caption(f"Total OTs con desviaciones negativas: {len(ots_desviacion_negativa)}")
+        else:
+            st.info("No hay OTs con desviaciones negativas")
+else:
+    st.info("No hay datos de desviaciones para mostrar")
+
+# ANÁLISIS PARETO DE DESVIACIONES NEGATIVAS
+st.markdown("---")
+st.header("📈 Análisis de Pareto - Desviaciones Negativas")
+
+if not ots_desviacion_negativa.empty:
+    # Preparar datos para Pareto
+    pareto_data = ots_desviacion_negativa[['ot', 'diferencia_horas']].copy()
+    pareto_data = pareto_data.sort_values('diferencia_horas', ascending=False)
+    
+    # Calcular porcentaje acumulado
+    pareto_data['porcentaje_acumulado'] = (pareto_data['diferencia_horas'].cumsum() / pareto_data['diferencia_horas'].sum()) * 100
+    
+    # Crear gráfico de Pareto
+    fig_pareto = go.Figure()
+    
+    # Barras de desviaciones
+    fig_pareto.add_trace(go.Bar(
+        x=pareto_data['ot'],
+        y=pareto_data['diferencia_horas'],
+        name='Horas de Desviación',
+        marker_color='#FF6B6B',
+        text=pareto_data['diferencia_horas'].round(1),
+        textposition='outside'
+    ))
+    
+    # Línea de porcentaje acumulado
+    fig_pareto.add_trace(go.Scatter(
+        x=pareto_data['ot'],
+        y=pareto_data['porcentaje_acumulado'],
+        name='Porcentaje Acumulado',
+        line=dict(color='#4ECDC4', width=3),
+        yaxis='y2',
+        mode='lines+markers'
+    ))
+    
+    fig_pareto.update_layout(
+        title="Principio de Pareto - Desviaciones Negativas por OT",
+        xaxis_title="OT",
+        yaxis_title="Horas de Desviación Negativa",
+        yaxis2=dict(
+            title="Porcentaje Acumulado (%)",
+            overlaying='y',
+            side='right',
+            range=[0, 100]
+        ),
+        showlegend=True,
+        height=500,
+        xaxis=dict(tickangle=45)
+    )
+    
+    st.plotly_chart(fig_pareto, use_container_width=True)
+    
+    # Análisis del principio 80/20
+    total_desviacion = pareto_data['diferencia_horas'].sum()
+    ots_80_percent = pareto_data[pareto_data['porcentaje_acumulado'] <= 80]
+    
+    st.subheader("🔍 Análisis 80/20")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("OTs que generan el 80%", f"{len(ots_80_percent)} OTs")
+    
+    with col2:
+        porcentaje_ots = (len(ots_80_percent) / len(pareto_data)) * 100
+        st.metric("% del total de OTs", f"{porcentaje_ots:.1f}%")
+    
+    with col3:
+        st.metric("Horas representadas", f"{ots_80_percent['diferencia_horas'].sum():.1f}h")
+    
+    # Tabla de OTs críticas
+    st.subheader("🎯 OTs Críticas (Principio 80/20)")
+    
+    ots_criticas_ids = ots_80_percent['ot'].tolist()
+    ots_criticas = ots_desviacion_negativa[ots_desviacion_negativa['ot'].isin(ots_criticas_ids)].copy()
+    
+    columnas_posibles = ['ot', 'cliente', 'descripcion', 'horas_estimadas_ot', 'horas_reales_ot', 'diferencia_horas', 'estatus']
+    columnas_disponibles = [col for col in columnas_posibles if col in ots_criticas.columns]
+    
+    if len(columnas_disponibles) > 0:
+        if 'diferencia_horas' in columnas_disponibles:
+            ots_criticas = ots_criticas.sort_values('diferencia_horas', ascending=False)
+        
+        st.dataframe(ots_criticas[columnas_disponibles], use_container_width=True, height=250)
+        st.caption(f"Se muestran {len(ots_criticas)} OTs críticas que representan el 80% de las desviaciones negativas")
+    else:
+        st.warning("No se encontraron columnas disponibles para mostrar las OTs críticas")
+    
+    st.info("""
+    **Interpretación del Análisis de Pareto:**
+    - El **20% de las OTs** suele generar el **80% de las desviaciones negativas**
+    - Enfocar esfuerzos en estas OTs críticas puede reducir significativamente las desviaciones
+    - Las OTs arriba de la línea del 80% son las que más impacto tienen
+    """)
+    
+else:
+    st.info("No hay desviaciones negativas para realizar el análisis de Pareto")
 
 # GRÁFICO DE FACTURACIÓN al final
 st.markdown("---")
 st.header("💰 Porcentaje de Facturación")
 col1, col2 = st.columns(2)
 
-fig_facturacion = None
 with col1:
     if total_ots > 0:
         fig_facturacion = px.pie(
@@ -384,287 +549,225 @@ with col1:
         )
         fig_facturacion.update_traces(textinfo='percent+label')
         st.plotly_chart(fig_facturacion, use_container_width=True)
-    else: st.info("No hay OTs para mostrar el gráfico de facturación")
+    else: 
+        st.info("No hay OTs para mostrar el gráfico de facturación")
 with col2:
     st.metric("OTs Facturadas", ots_facturadas)
     st.metric("OTs Pendientes", total_ots - ots_facturadas)
     st.metric("Porcentaje de Facturación", f"{porcentaje_facturado:.1f}%")
-    if total_ots > 0: st.info(f"Eficiencia de facturación: {porcentaje_facturado:.1f}%")
-    else: st.info("No hay OTs para mostrar el resumen de facturación")
+    if total_ots > 0: 
+        st.info(f"Eficiencia de facturación: {porcentaje_facturado:.1f}%")
+    else: 
+        st.info("No hay OTs para mostrar el resumen de facturación")
 
-# NUEVA SECCIÓN: GENERACIÓN DE POWERPOINT
+# =============================================
+# FUNCIONES DE EXPORTACIÓN MEJORADAS
+# =============================================
+
+def exportar_a_powerpoint():
+    """Exportar reporte ejecutivo a PowerPoint"""
+    try:
+        with st.spinner("📊 Generando presentación PowerPoint..."):
+            # Crear nueva presentación
+            prs = Presentation()
+            
+            # Slide 1: Portada
+            slide_layout = prs.slide_layouts[0]  # Layout de título
+            slide = prs.slides.add_slide(slide_layout)
+            title = slide.shapes.title
+            subtitle = slide.placeholders[1]
+            title.text = "Reporte de Producción"
+            subtitle.text = f"Adimatec - {datetime.now().strftime('%d/%m/%Y')}"
+            
+            # Slide 2: Métricas Principales
+            slide_layout = prs.slide_layouts[1]  # Layout de título y contenido
+            slide = prs.slides.add_slide(slide_layout)
+            title = slide.shapes.title
+            title.text = "Métricas Principales"
+            
+            content = slide.placeholders[1]
+            text_frame = content.text_frame
+            text_frame.text = f"""• Total OTs: {total_ots}
+• OTs Facturadas: {ots_facturadas} ({porcentaje_facturado:.1f}%)
+• OTs en Proceso: {ots_en_proceso}
+• OTs Vencidas: {ots_vencidas}
+• OTs por Vencer: {ots_por_vencer}
+• Reprocesos: {total_reprocesos} ({porcentaje_reprocesos:.1f}%)"""
+            
+            # Slide 3: Análisis de Eficiencia
+            slide = prs.slides.add_slide(slide_layout)
+            title = slide.shapes.title
+            title.text = "Análisis de Eficiencia"
+            
+            content = slide.placeholders[1]
+            text_frame = content.text_frame
+            text_frame.text = f"""• Eficiencia de Facturación: {porcentaje_facturado:.1f}%
+• Tasa de Reprocesos: {porcentaje_reprocesos:.1f}%
+• Horas Programadas Totales: {total_horas_programadas:.1f}h
+• Desviaciones Positivas: {porcentaje_positivo:.1f}%
+• Desviaciones Negativas: {porcentaje_negativo:.1f}%"""
+            
+            # Slide 4: OTs Críticas (si existen)
+            if not ots_desviacion_negativa.empty:
+                slide = prs.slides.add_slide(slide_layout)
+                title = slide.shapes.title
+                title.text = "OTs con Desviaciones Negativas"
+                
+                content = slide.placeholders[1]
+                text_frame = content.text_frame
+                
+                # Tomar las 5 OTs con mayores desviaciones
+                top_ots = ots_desviacion_negativa.nlargest(5, 'diferencia_horas')
+                texto_ots = "Principales OTs con desviaciones:\n\n"
+                for idx, row in top_ots.iterrows():
+                    texto_ots += f"• OT {row['ot']}: {row['diferencia_horas']:.1f}h (Cliente: {row.get('cliente', 'N/A')})\n"
+                
+                text_frame.text = texto_ots
+            
+            # Slide 5: Recomendaciones
+            slide = prs.slides.add_slide(slide_layout)
+            title = slide.shapes.title
+            title.text = "Recomendaciones y Acciones"
+            
+            content = slide.placeholders[1]
+            text_frame = content.text_frame
+            text_frame.text = """• Enfocar recursos en OTs vencidas y por vencer
+• Analizar causas de reprocesos
+• Optimizar estimación de horas
+• Revisar OTs con mayores desviaciones
+• Mantener comunicación con clientes críticos"""
+            
+            # Guardar en memoria
+            from io import BytesIO
+            pptx_buffer = BytesIO()
+            prs.save(pptx_buffer)
+            pptx_buffer.seek(0)
+            
+            # Botón de descarga
+            st.download_button(
+                label="🎯 Descargar PowerPoint Ejecutivo",
+                data=pptx_buffer.getvalue(),
+                file_name=f"Reporte_Ejecutivo_Adimatec_{datetime.now().strftime('%Y%m%d')}.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True
+            )
+            
+            st.success("✅ Presentación PowerPoint generada exitosamente!")
+            
+    except Exception as e:
+        st.error(f"Error al generar PowerPoint: {str(e)}")
+
+def exportar_a_excel():
+    """Exportar datos completos a Excel"""
+    try:
+        with st.spinner("📊 Generando archivo Excel..."):
+            # Crear un escritor de Excel
+            with pd.ExcelWriter('reporte_adimatec.xlsx', engine='openpyxl') as writer:
+                # Hoja 1: OT Master
+                ot_master_filtrado.to_excel(writer, sheet_name='OT_Master', index=False)
+                
+                # Hoja 2: Procesos
+                if not procesos_filtrados.empty:
+                    procesos_filtrados.to_excel(writer, sheet_name='Procesos', index=False)
+                
+                # Hoja 3: Resumen Ejecutivo
+                resumen_data = {
+                    'Métrica': [
+                        'Total OTs', 
+                        'OTs Facturadas', 
+                        'OTs en Proceso', 
+                        'OTs Vencidas', 
+                        'OTs por Vencer',
+                        '% Facturación',
+                        '% Reprocesos',
+                        'Horas Programadas Totales',
+                        'Desviaciones Positivas',
+                        'Desviaciones Negativas'
+                    ],
+                    'Valor': [
+                        total_ots,
+                        ots_facturadas,
+                        ots_en_proceso,
+                        ots_vencidas,
+                        ots_por_vencer,
+                        f"{porcentaje_facturado:.1f}%",
+                        f"{porcentaje_reprocesos:.1f}%",
+                        f"{total_horas_programadas:.1f}h",
+                        f"{horas_desviacion_positiva:.1f}h",
+                        f"{horas_desviacion_negativa:.1f}h"
+                    ]
+                }
+                pd.DataFrame(resumen_data).to_excel(writer, sheet_name='Resumen', index=False)
+                
+                # Hoja 4: OTs Críticas
+                if not ots_desviacion_negativa.empty:
+                    columnas_criticas = ['ot', 'cliente', 'horas_estimadas_ot', 'horas_reales_ot', 'diferencia_horas']
+                    columnas_disponibles = [col for col in columnas_criticas if col in ots_desviacion_negativa.columns]
+                    if columnas_disponibles:
+                        ots_desviacion_negativa[columnas_disponibles].to_excel(writer, sheet_name='OTs_Criticas', index=False)
+            
+            # Ofrecer descarga
+            with open('reporte_adimatec.xlsx', 'rb') as f:
+                st.download_button(
+                    label="📈 Descargar Excel Completo",
+                    data=f.read(),
+                    file_name=f"Reporte_Adimatec_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            
+            # Limpiar archivo temporal
+            if os.path.exists('reporte_adimatec.xlsx'):
+                os.remove('reporte_adimatec.xlsx')
+                
+            st.success("✅ Archivo Excel generado exitosamente!")
+            
+    except Exception as e:
+        st.error(f"Error al generar Excel: {str(e)}")
+
+# =============================================
+# SECCIÓN DE EXPORTACIÓN MEJORADA
+# =============================================
+
 st.markdown("---")
-st.header("📊 Generar Reporte Ejecutivo")
+st.header("🚀 Exportar Reportes Ejecutivos")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("🎯 Presentación PowerPoint")
-    st.info("Genera un reporte ejecutivo completo en formato PowerPoint listo para presentar.")
+    st.subheader("📊 PowerPoint Ejecutivo")
+    st.info("Presentación profesional lista para reuniones")
     
-    if st.button("🚀 Generar Reporte PowerPoint Completo", type="primary", use_container_width=True):
-        generar_powerpoint_completo()
+    if st.button("🎯 Generar PowerPoint", use_container_width=True, type="primary"):
+        exportar_a_powerpoint()
 
 with col2:
-    st.subheader("📸 Exportar Gráficos")
-    st.info("Descarga todos los gráficos como imágenes PNG para usar en otros reportes.")
+    st.subheader("📈 Datos para Análisis")
+    st.info("Datos completos en Excel para análisis detallado")
     
-    if st.button("🖼️ Exportar Gráficos como Imágenes", use_container_width=True):
-        exportar_graficos_imagenes()
+    if st.button("📊 Generar Reporte Excel", use_container_width=True):
+        exportar_a_excel()
 
-# FUNCIONES PARA POWERPOINT
-def generar_powerpoint_completo():
-    """Generar una presentación PowerPoint profesional con todos los gráficos y métricas"""
-    try:
-        with st.spinner("🔄 Generando reporte ejecutivo en PowerPoint..."):
-            # Crear una nueva presentación
-            prs = Presentation()
-            
-            # Slide 1: Portada
-            slide = prs.slides.add_slide(prs.slide_layouts[0])
-            title = slide.shapes.title
-            subtitle = slide.placeholders[1]
-            
-            title.text = "REPORTE DE PRODUCCIÓN"
-            title.text_frame.paragraphs[0].font.size = Pt(44)
-            title.text_frame.paragraphs[0].font.bold = True
-            
-            subtitle.text = f"Adimatec S.A.\n{datetime.now().strftime('%d de %B de %Y')}\nDashboard de Producción"
-            subtitle.text_frame.paragraphs[0].font.size = Pt(24)
-            
-            # Slide 2: Resumen Ejecutivo
-            slide = prs.slides.add_slide(prs.slide_layouts[1])
-            title = slide.shapes.title
-            content = slide.placeholders[1]
-            
-            title.text = "Resumen Ejecutivo"
-            tf = content.text_frame
-            tf.text = f"Período: {fecha_inicio if fecha_inicio else 'Inicio'} - {fecha_fin if fecha_fin else 'Actual'}"
-            
-            p = tf.add_paragraph()
-            p.text = f"• Total de OTs Analizadas: {total_ots}"
-            p = tf.add_paragraph()
-            p.text = f"• OTs Facturadas: {ots_facturadas} ({porcentaje_facturado:.1f}%)"
-            p = tf.add_paragraph()
-            p.text = f"• OTs en Proceso: {ots_en_proceso}"
-            p = tf.add_paragraph()
-            p.text = f"• OTs Vencidas: {ots_vencidas}"
-            p = tf.add_paragraph()
-            p.text = f"• OTs por Vencer: {ots_por_vencer}"
-            p = tf.add_paragraph()
-            p.text = f"• Reprocesos Identificados: {total_reprocesos} ({porcentaje_reprocesos:.1f}%)"
-            
-            # Slide 3: Métricas de Performance
-            slide = prs.slides.add_slide(prs.slide_layouts[1])
-            title = slide.shapes.title
-            content = slide.placeholders[1]
-            
-            title.text = "Métricas Clave de Performance"
-            tf = content.text_frame
-            tf.text = "Indicadores de Eficiencia Operativa:"
-            
-            p = tf.add_paragraph()
-            p.text = f"📊 Eficiencia en Facturación: {porcentaje_facturado:.1f}%"
-            p = tf.add_paragraph()
-            p.text = f"⚡ Tasa de Cumplimiento: {((total_ots - ots_vencidas) / total_ots * 100) if total_ots > 0 else 0:.1f}%"
-            p = tf.add_paragraph()
-            p.text = f"⚠️  Tasa de Reprocesos: {porcentaje_reprocesos:.1f}%"
-            p = tf.add_paragraph()
-            p.text = f"📅 OTs por Vencer (Próximos 7 días): {ots_por_vencer}"
-            p = tf.add_paragraph()
-            p.text = f"🔴 OTs Vencidas Críticas: {ots_vencidas}"
-            
-            # Slide 4: OTs Vencidas y Por Vencer
-            if fig_ots_vencidas is not None:
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title_shape = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.8))
-                title_frame = title_shape.text_frame
-                title_frame.text = "ANÁLISIS DE OTs VENCIDAS Y POR VENCER"
-                title_frame.paragraphs[0].font.size = Pt(24)
-                title_frame.paragraphs[0].font.bold = True
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmpfile:
-                    fig_ots_vencidas.write_image(tmpfile.name, width=1000, height=600, scale=2)
-                    slide.shapes.add_picture(tmpfile.name, Inches(0.5), Inches(1.2), width=Inches(9))
-                    os.unlink(tmpfile.name)
-                
-                # Agregar nota explicativa
-                nota_shape = slide.shapes.add_textbox(Inches(0.5), Inches(6), Inches(9), Inches(0.8))
-                nota_frame = nota_shape.text_frame
-                nota_frame.text = f"• OTs Vencidas: {ots_vencidas} | OTs por Vencer: {ots_por_vencer}"
-                nota_frame.paragraphs[0].font.size = Pt(14)
-                nota_frame.paragraphs[0].font.color.rgb = RGBColor(128, 128, 128)
-            
-            # Slide 5: Facturación
-            if fig_facturacion is not None:
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title_shape = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.8))
-                title_frame = title_shape.text_frame
-                title_frame.text = "ANÁLISIS DE FACTURACIÓN"
-                title_frame.paragraphs[0].font.size = Pt(24)
-                title_frame.paragraphs[0].font.bold = True
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmpfile:
-                    fig_facturacion.write_image(tmpfile.name, width=800, height=600, scale=2)
-                    slide.shapes.add_picture(tmpfile.name, Inches(1), Inches(1.2), width=Inches(8))
-                    os.unlink(tmpfile.name)
-                
-                # Métricas de facturación
-                metrics_shape = slide.shapes.add_textbox(Inches(0.5), Inches(6), Inches(9), Inches(1))
-                metrics_frame = metrics_shape.text_frame
-                metrics_frame.text = f"Eficiencia: {porcentaje_facturado:.1f}% | Pendientes: {total_ots - ots_facturadas} OTs"
-                metrics_frame.paragraphs[0].font.size = Pt(16)
-            
-            # Slide 6: Reprocesos
-            if fig_reprocesos is not None and total_reprocesos > 0:
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title_shape = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.8))
-                title_frame = title_shape.text_frame
-                title_frame.text = "ANÁLISIS DE REPROCESOS"
-                title_frame.paragraphs[0].font.size = Pt(24)
-                title_frame.paragraphs[0].font.bold = True
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmpfile:
-                    fig_reprocesos.write_image(tmpfile.name, width=800, height=600, scale=2)
-                    slide.shapes.add_picture(tmpfile.name, Inches(1), Inches(1.2), width=Inches(8))
-                    os.unlink(tmpfile.name)
-                
-                # Análisis de reprocesos
-                analysis_shape = slide.shapes.add_textbox(Inches(0.5), Inches(6), Inches(9), Inches(1))
-                analysis_frame = analysis_shape.text_frame
-                analysis_frame.text = f"Tasa de reprocesos: {porcentaje_reprocesos:.1f}% | {total_reprocesos} OTs identificadas"
-                analysis_frame.paragraphs[0].font.size = Pt(16)
-            
-            # Slide 7: Desviaciones de Horas
-            if fig_desviaciones is not None and total_horas_programadas > 0:
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title_shape = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.8))
-                title_frame = title_shape.text_frame
-                title_frame.text = "DESVIACIONES DE HORAS PROGRAMADAS"
-                title_frame.paragraphs[0].font.size = Pt(24)
-                title_frame.paragraphs[0].font.bold = True
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmpfile:
-                    fig_desviaciones.write_image(tmpfile.name, width=1000, height=600, scale=2)
-                    slide.shapes.add_picture(tmpfile.name, Inches(0.5), Inches(1.2), width=Inches(9))
-                    os.unlink(tmpfile.name)
-                
-                # Resumen de desviaciones
-                summary_shape = slide.shapes.add_textbox(Inches(0.5), Inches(6), Inches(9), Inches(1))
-                summary_frame = summary_shape.text_frame
-                summary_frame.text = f"Desviaciones Positivas: {porcentaje_positivo:.1f}% | Negativas: {porcentaje_negativo:.1f}%"
-                summary_frame.paragraphs[0].font.size = Pt(16)
-            
-            # Slide 8: Recomendaciones y Acciones
-            slide = prs.slides.add_slide(prs.slide_layouts[1])
-            title = slide.shapes.title
-            content = slide.placeholders[1]
-            
-            title.text = "Recomendaciones y Plan de Acción"
-            tf = content.text_frame
-            tf.text = "Acciones Prioritarias Identificadas:"
-            
-            if ots_vencidas > 0:
-                p = tf.add_paragraph()
-                p.text = f"🚨 Atender {ots_vencidas} OTs vencidas críticas"
-            if ots_por_vencer > 0:
-                p = tf.add_paragraph()
-                p.text = f"📅 Revisar {ots_por_vencer} OTs por vencer en próximos 7 días"
-            if porcentaje_reprocesos > 5:
-                p = tf.add_paragraph()
-                p.text = f"🔧 Analizar causas de reprocesos ({porcentaje_reprocesos:.1f}%)"
-            if porcentaje_facturado < 80:
-                p = tf.add_paragraph()
-                p.text = f"💵 Mejorar proceso de facturación ({porcentaje_facturado:.1f}%)"
-            
-            p = tf.add_paragraph()
-            p.text = f"\nPróxima revisión: {(datetime.now() + timedelta(days=7)).strftime('%d/%m/%Y')}"
-            
-            # Guardar presentación
-            filename = f"Reporte_Produccion_Adimatec_{datetime.now().strftime('%Y%m%d_%H%M')}.pptx"
-            prs.save(filename)
-            
-            # Ofrecer descarga
-            with open(filename, 'rb') as f:
-                st.download_button(
-                    label="📥 Descargar Reporte PowerPoint",
-                    data=f.read(),
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True
-                )
-            
-            st.success("🎉 ¡Reporte ejecutivo generado exitosamente!")
-            st.info("💡 **El reporte incluye:** Portada, Resumen Ejecutivo, Métricas Clave, Análisis de OTs Vencidas, Facturación, Reprocesos, Desviaciones de Horas y Plan de Acción.")
-            
-    except ImportError:
-        st.error("""
-        **Error:** Se requiere la librería `python-pptx`
-        
-        Para instalar ejecuta: 
-        ```bash
-        pip install python-pptx
-        ```
-        """)
-    except Exception as e:
-        st.error(f"❌ Error al generar la presentación: {str(e)}")
+# Información adicional
+st.markdown("---")
+st.info("""
+💡 **Características de los Reportes:**
 
-def exportar_graficos_imagenes():
-    """Exportar gráficos individuales como imágenes PNG"""
-    try:
-        with st.spinner("📸 Exportando gráficos como imágenes..."):
-            temp_files = []
-            
-            # Lista de gráficos a exportar
-            graficos = {
-                "01_OTs_Vencidas_Por_Vencer.png": fig_ots_vencidas,
-                "02_Facturacion.png": fig_facturacion,
-                "03_Reprocesos.png": fig_reprocesos,
-                "04_Desviaciones_Horas.png": fig_desviaciones,
-                "05_OTs_por_Cliente.png": fig_clientes if 'fig_clientes' in locals() else None,
-                "06_OTs_por_Estatus.png": fig_estatus if 'fig_estatus' in locals() else None
-            }
-            
-            for filename, figura in graficos.items():
-                if figura is not None:
-                    try:
-                        temp_path = f"temp_{filename}"
-                        figura.write_image(temp_path, width=1200, height=800, scale=2)
-                        temp_files.append(temp_path)
-                    except Exception as e:
-                        st.warning(f"No se pudo exportar {filename}: {str(e)}")
-            
-            if temp_files:
-                # Crear ZIP
-                zip_filename = f"Graficos_Produccion_Adimatec_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
-                with zipfile.ZipFile(zip_filename, 'w') as zipf:
-                    for file in temp_files:
-                        zipf.write(file, os.path.basename(file))
-                
-                # Ofrecer descarga
-                with open(zip_filename, 'rb') as f:
-                    st.download_button(
-                        label="📦 Descargar Todos los Gráficos (ZIP)",
-                        data=f.read(),
-                        file_name=zip_filename,
-                        mime="application/zip",
-                        use_container_width=True
-                    )
-                
-                # Limpiar archivos temporales
-                for file in temp_files + [zip_filename]:
-                    if os.path.exists(file):
-                        os.remove(file)
-                
-                st.success(f"✅ {len(temp_files)} gráficos exportados exitosamente!")
-                st.info("📁 Los gráficos se descargarán en alta resolución (PNG) comprimidos en un archivo ZIP.")
-            else:
-                st.warning("⚠️ No hay gráficos disponibles para exportar.")
-                
-    except Exception as e:
-        st.error(f"❌ Error al exportar gráficos: {str(e)}")
+**PowerPoint Ejecutivo:**
+- ✅ Presentación lista para reuniones
+- ✅ Métricas clave resumidas
+- ✅ Análisis de eficiencia
+- ✅ OTs críticas identificadas
+- ✅ Recomendaciones de acción
 
-# Tablas de datos (se mantienen igual)
+**Excel Completo:**
+- ✅ Todos los datos filtrados
+- ✅ Hojas organizadas por categoría
+- ✅ Resumen ejecutivo incluido
+- ✅ Formato listo para análisis
+""")
+
+# Tablas de datos
 st.markdown("---")
 st.header("📋 Datos Detallados")
 tab1, tab2 = st.tabs(["OT Master", "Procesos"])
@@ -676,7 +779,8 @@ with tab1:
         st.dataframe(ot_master_filtrado[columnas_disponibles], use_container_width=True, hide_index=True)
         csv_ot = ot_master_filtrado.to_csv(index=False)
         st.download_button(label="📥 Descargar OT Master como CSV", data=csv_ot, file_name="ot_master_filtrado.csv", mime="text/csv")
-    else: st.info("No hay datos para mostrar en OT Master")
+    else: 
+        st.info("No hay datos para mostrar en OT Master")
 with tab2:
     st.subheader("Tabla Procesos")
     posibles_nombres = ['proceso', 'Proceso', 'PROCESO', 'proceso_nombre', 'Proceso_Nombre']
@@ -691,7 +795,8 @@ with tab2:
         st.dataframe(procesos_filtrados[columnas_disponibles_procesos], use_container_width=True, hide_index=True)
         csv_procesos = procesos_filtrados.to_csv(index=False)
         st.download_button(label="📥 Descargar Procesos como CSV", data=csv_procesos, file_name="procesos_filtrados.csv", mime="text/csv")
-    else: st.info("No hay datos para mostrar en Procesos")
+    else: 
+        st.info("No hay datos para mostrar en Procesos")
 
 # Footer
 st.markdown("---")
@@ -699,7 +804,7 @@ st.markdown(
     """
     <div style='text-align: center'>
         <p>Dashboard de Producción - Adimatec | Desarrollado con Streamlit</p>
-        <p><small>✨ Incluye generación automática de reportes PowerPoint</small></p>
+        <p><small>✨ Incluye análisis de Pareto y exportación a PowerPoint</small></p>
     </div>
     """,
     unsafe_allow_html=True
