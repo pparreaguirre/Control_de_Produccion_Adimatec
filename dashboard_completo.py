@@ -820,8 +820,11 @@ def exportar_a_excel():
         st.error(f"Error al generar Excel: {str(e)}")
 
 # =============================================
-# SECCIÓN DE EXPORTACIÓN MEJORADA
+# SECCIÓN DE EXPORTACIÓN MEJORADA (POSICIÓN MÁS VISIBLE)
 # =============================================
+
+# ESTA SECCIÓN VA JUSTO DESPUÉS DE LAS MÉTRICAS PRINCIPALES
+# Busca en tu código donde están las métricas principales y agrega esto inmediatamente después:
 
 st.markdown("---")
 st.header("🚀 Exportar Reportes Ejecutivos")
@@ -832,21 +835,21 @@ with col1:
     st.subheader("📊 PowerPoint Ejecutivo")
     st.info("Presentación profesional lista para reuniones")
     
-    if st.button("🎯 Generar PowerPoint", use_container_width=True, type="primary"):
+    if st.button("🎯 Generar PowerPoint", use_container_width=True, type="primary", key="ppt_btn"):
         exportar_a_powerpoint()
 
 with col2:
     st.subheader("📄 Reporte PDF")
     st.info("Documento formal para distribución")
     
-    if st.button("📋 Generar PDF", use_container_width=True):
+    if st.button("📋 Generar PDF", use_container_width=True, key="pdf_btn"):
         exportar_a_pdf()
 
 with col3:
     st.subheader("📈 Datos para Análisis")
     st.info("Datos completos en Excel para análisis detallado")
     
-    if st.button("📊 Generar Reporte Excel", use_container_width=True):
+    if st.button("📊 Generar Reporte Excel", use_container_width=True, key="excel_btn"):
         exportar_a_excel()
 
 # Información adicional
@@ -874,6 +877,7 @@ st.info("""
 - ✅ Formato listo para análisis
 """)
 
+st.markdown("---")  # Línea separadora antes de continuar con los gráficos
 # Tablas de datos
 st.markdown("---")
 st.header("📋 Datos Detallados")
