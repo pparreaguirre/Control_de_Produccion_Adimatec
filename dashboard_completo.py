@@ -11,6 +11,7 @@ import io
 import os
 from pptx import Presentation
 from pptx.util import Inches
+from fpdf import FPDF
 
 # =============================================
 # CONFIGURACIÓN STREAMLIT
@@ -657,6 +658,99 @@ def exportar_a_powerpoint():
     except Exception as e:
         st.error(f"Error al generar PowerPoint: {str(e)}")
 
+def exportar_a_pdf():
+    """Exportar reporte a PDF"""
+    try:
+        with st.spinner("📄 Generando reporte PDF..."):
+            # Crear PDF
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # Encabezado
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(200, 10, "Reporte de Producción - Adimatec", 0, 1, 'C')
+            pdf.ln(5)
+            
+            pdf.set_font("Arial", '', 12)
+            pdf.cell(200, 10, f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 0, 1, 'C')
+            pdf.ln(10)
+            
+            # Métricas Principales
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 10, "Métricas Principales", 0, 1)
+            pdf.ln(5)
+            
+            pdf.set_font("Arial", '', 12)
+            metricas = [
+                f"Total OTs: {total_ots}",
+                f"OTs Facturadas: {ots_facturadas} ({porcentaje_facturado:.1f}%)",
+                f"OTs en Proceso: {ots_en_proceso}",
+                f"OTs Vencidas: {ots_vencidas}",
+                f"OTs por Vencer: {ots_por_vencer}",
+                f"Reprocesos: {total_reprocesos} ({porcentaje_reprocesos:.1f}%)"
+            ]
+            
+            for metrica in metricas:
+                pdf.cell(200, 10, metrica, 0, 1)
+            
+            pdf.ln(10)
+            
+            # Análisis de Eficiencia
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 10, "Análisis de Eficiencia", 0, 1)
+            pdf.ln(5)
+            
+            pdf.set_font("Arial", '', 12)
+            eficiencia = [
+                f"Horas Programadas Totales: {total_horas_programadas:.1f}h",
+                f"Desviaciones Positivas: {porcentaje_positivo:.1f}%",
+                f"Desviaciones Negativas: {porcentaje_negativo:.1f}%"
+            ]
+            
+            for item in eficiencia:
+                pdf.cell(200, 10, item, 0, 1)
+            
+            pdf.ln(10)
+            
+            # Recomendaciones
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(200, 10, "Recomendaciones", 0, 1)
+            pdf.ln(5)
+            
+            pdf.set_font("Arial", '', 12)
+            recomendaciones = [
+                "• Enfocar recursos en OTs vencidas y por vencer",
+                "• Analizar causas de reprocesos",
+                "• Optimizar estimación de horas",
+                "• Revisar OTs con mayores desviaciones",
+                "• Mantener comunicación con clientes críticos"
+            ]
+            
+            for recomendacion in recomendaciones:
+                pdf.cell(200, 10, recomendacion, 0, 1)
+            
+            # Guardar en memoria
+            pdf_output = "reporte_adimatec.pdf"
+            pdf.output(pdf_output)
+            
+            with open(pdf_output, "rb") as f:
+                st.download_button(
+                    label="📄 Descargar PDF",
+                    data=f.read(),
+                    file_name=f"Reporte_Adimatec_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            
+            # Limpiar archivo temporal
+            if os.path.exists(pdf_output):
+                os.remove(pdf_output)
+                
+            st.success("✅ Reporte PDF generado exitosamente!")
+            
+    except Exception as e:
+        st.error(f"Error al generar PDF: {str(e)}")
+
 def exportar_a_excel():
     """Exportar datos completos a Excel"""
     try:
@@ -732,7 +826,7 @@ def exportar_a_excel():
 st.markdown("---")
 st.header("🚀 Exportar Reportes Ejecutivos")
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     st.subheader("📊 PowerPoint Ejecutivo")
@@ -742,6 +836,13 @@ with col1:
         exportar_a_powerpoint()
 
 with col2:
+    st.subheader("📄 Reporte PDF")
+    st.info("Documento formal para distribución")
+    
+    if st.button("📋 Generar PDF", use_container_width=True):
+        exportar_a_pdf()
+
+with col3:
     st.subheader("📈 Datos para Análisis")
     st.info("Datos completos en Excel para análisis detallado")
     
@@ -759,6 +860,12 @@ st.info("""
 - ✅ Análisis de eficiencia
 - ✅ OTs críticas identificadas
 - ✅ Recomendaciones de acción
+
+**Reporte PDF:**
+- ✅ Documento formal listo para imprimir
+- ✅ Métricas principales organizadas
+- ✅ Análisis detallado
+- ✅ Recomendaciones específicas
 
 **Excel Completo:**
 - ✅ Todos los datos filtrados
@@ -804,7 +911,7 @@ st.markdown(
     """
     <div style='text-align: center'>
         <p>Dashboard de Producción - Adimatec | Desarrollado con Streamlit</p>
-        <p><small>✨ Incluye análisis de Pareto y exportación a PowerPoint</small></p>
+        <p><small>✨ Incluye análisis de Pareto y exportación a PowerPoint/PDF</small></p>
     </div>
     """,
     unsafe_allow_html=True
